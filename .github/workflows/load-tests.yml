@@ -9,6 +9,9 @@ on:
       - "src/escrow_trader.rs"
       - "src/leaderboards.rs"
       - "src/storage_optim.rs"
+      - "src/pvp_combat.rs"
+      - "src/recycling_crafter.rs"
+      - "src/blueprint_factory.rs"
       - "tests/load/**"
   workflow_dispatch:
     inputs:
@@ -33,7 +36,7 @@ jobs:
         working-directory: tests/load
         run: |
           set -o pipefail
-          for s in nebula_scan_load resource_mint_load trading_load leaderboard_load; do
+          for s in nebula_scan_load resource_mint_load trading_load leaderboard_load crafting_load combat_load; do
             echo "## $s" >> summary.md
             echo '```' >> summary.md
             k6 run -q "$s.js" | tee -a summary.md
