@@ -67,7 +67,7 @@ pub enum HousingKey {
     /// Featured houses for a discovery tier.
     Discovery(Symbol),
     /// Furniture counter.
-    Counter,
+    HousingCounter,
 }
 
 // ─── Data Types ───────────────────────────────────────────────────────────────
@@ -459,13 +459,13 @@ pub fn define_furniture(
     let furniture_id: u64 = env
         .storage()
         .persistent()
-        .get::<HousingKey, u64>(&HousingKey::Counter)
+        .get::<HousingKey, u64>(&HousingKey::HousingCounter)
         .unwrap_or(0)
         .saturating_add(1);
 
     env.storage()
         .persistent()
-        .set(&HousingKey::Counter, &furniture_id);
+        .set(&HousingKey::HousingCounter, &furniture_id);
 
     let item = FurnitureItem {
         furniture_id,

@@ -65,11 +65,11 @@ impl crate::error_standard::StandardContractError for PvPError {
 #[derive(Clone)]
 pub enum PvPDataKey {
     /// Player combat stats.
-    PlayerStats(Address),
+    PvpPlayerStats(Address),
     /// Active challenge by ID.
-    Challenge(u64),
+    PvpChallenge(u64),
     /// Challenge counter.
-    ChallengeCounter,
+    PvpChallengeCounter,
     /// Active combat by ID.
     Combat(u64),
     /// Combat counter.
@@ -87,9 +87,9 @@ pub enum PvPDataKey {
     /// Combat rewards config.
     RewardsConfig,
     /// Admin address.
-    Admin,
+    PvpAdmin,
     /// Last active timestamp for a player (Issue #191).
-    LastActive(Address),
+    PvpLastActive(Address),
     /// ELO decay configuration.
     EloDecayConfig,
 }
@@ -221,7 +221,7 @@ pub fn set_admin(env: &Env, admin: &Address) -> Result<(), PvPError> {
     if get_admin(env).is_some() {
         return Err(PvPError::AlreadyInitialized);
     }
-    env.storage().persistent().set(&PvPDataKey::Admin, admin);
+    env.storage().persistent().set(&PvPDataKey::PvpAdmin, admin);
     env.events().publish(
         (symbol_short!("pvp"), symbol_short!("admin_set")),
         (Option::<Address>::None, admin.clone()),
@@ -230,7 +230,7 @@ pub fn set_admin(env: &Env, admin: &Address) -> Result<(), PvPError> {
 }
 
 fn get_admin(env: &Env) -> Option<Address> {
-    env.storage().persistent().get(&PvPDataKey::Admin)
+    env.storage().persistent().get(&PvPDataKey::PvpAdmin)
 }
 
 fn require_admin(env: &Env, caller: &Address) -> Result<(), PvPError> {
@@ -257,7 +257,7 @@ pub fn get_or_init_stats(env: &Env, player: &Address) -> CombatStats {
 /// instead of once in the decay path and again afterwards. Returning the
 /// ELO lets `end_combat` skip another rating read.
 fn load_stats_with_elo(env: &Env, player: &Address) -> (CombatStats, u32) {
-    let key = PvPDataKey::PlayerStats(player.clone());
+    let key = PvPDataKey::PvpPlayerStats(player.clone());
     let stats = env.storage().persistent().get(&key).unwrap_or(CombatStats {
         wins: 0,
         losses: 0,
@@ -276,7 +276,7 @@ fn load_stats_with_elo(env: &Env, player: &Address) -> (CombatStats, u32) {
 }
 
 pub fn update_stats(env: &Env, player: &Address, stats: &CombatStats) {
-    let key = PvPDataKey::PlayerStats(player.clone());
+    let key = PvPDataKey::PvpPlayerStats(player.clone());
     env.storage().persistent().set(&key, stats);
     env.events().publish(
         (symbol_short!("pvp"), symbol_short!("stats_upd")),
@@ -329,7 +329,7 @@ fn calculate_elo_change(winner_rating: u32, loser_rating: u32) -> (u32, u32) {
 
 /// Track the last active timestamp for a player. Called on any PvP action.
 pub fn update_last_active(env: &Env, player: &Address) {
-    let key = PvPDataKey::LastActive(player.clone());
+    let key = PvPDataKey::PvpLastActive(player.clone());
     let timestamp = env.ledger().timestamp();
     env.storage().persistent().set(&key, &timestamp);
     env.events().publish(
@@ -340,7 +340,7 @@ pub fn update_last_active(env: &Env, player: &Address) {
 
 /// Get the last active timestamp for a player.
 pub fn get_last_active(env: &Env, player: &Address) -> u64 {
-    let key = PvPDataKey::LastActive(player.clone());
+    let key = PvPDataKey::PvpLastActive(player.clone());
     env.storage().persistent().get(&key).unwrap_or(0)
 }
 
@@ -469,12 +469,12 @@ pub fn create_challenge(
     let counter: u64 = env
         .storage()
         .persistent()
-        .get(&PvPDataKey::ChallengeCounter)
+        .get(&PvPDataKey::PvpChallengeCounter)
         .unwrap_or(0);
     let challenge_id = counter + 1;
     env.storage()
         .persistent()
-        .set(&PvPDataKey::ChallengeCounter, &challenge_id);
+        .set(&PvPDataKey::PvpChallengeCounter, &challenge_id);
 
     let now = env.ledger().timestamp();
     let challenge = Challenge {
@@ -489,7 +489,7 @@ pub fn create_challenge(
 
     env.storage()
         .persistent()
-        .set(&PvPDataKey::Challenge(challenge_id), &challenge);
+        .set(&PvPDataKey::PvpChallenge(challenge_id), &challenge);
 
     env.events().publish(
         (symbol_short!("pvp"), symbol_short!("chall")),
@@ -502,7 +502,7 @@ pub fn create_challenge(
 pub fn accept_challenge(env: &Env, caller: &Address, challenge_id: u64) -> Result<u64, PvPError> {
     caller.require_auth();
 
-    let key = PvPDataKey::Challenge(challenge_id);
+    let key = PvPDataKey::PvpChallenge(challenge_id);
     let mut challenge: Challenge = env
         .storage()
         .persistent()
@@ -538,7 +538,7 @@ pub fn accept_challenge(env: &Env, caller: &Address, challenge_id: u64) -> Resul
 pub fn decline_challenge(env: &Env, caller: &Address, challenge_id: u64) -> Result<(), PvPError> {
     caller.require_auth();
 
-    let key = PvPDataKey::Challenge(challenge_id);
+    let key = PvPDataKey::PvpChallenge(challenge_id);
     let mut challenge: Challenge = env
         .storage()
         .persistent()
@@ -561,7 +561,7 @@ pub fn decline_challenge(env: &Env, caller: &Address, challenge_id: u64) -> Resu
 }
 
 pub fn get_challenge(env: &Env, challenge_id: u64) -> Result<Challenge, PvPError> {
-    let key = PvPDataKey::Challenge(challenge_id);
+    let key = PvPDataKey::PvpChallenge(challenge_id);
     env.storage()
         .persistent()
         .get(&key)
