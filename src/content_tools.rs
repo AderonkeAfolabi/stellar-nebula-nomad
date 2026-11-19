@@ -895,81 +895,76 @@ mod tests {
 
     fn make_env() -> (Env, soroban_sdk::Address) {
         let env = Env::default();
+        env.mock_all_auths();
         let id = env.register(Stub, ());
         (env, id)
     }
 
-    // // #[test]
-    fn test_create_content() {
-        let (env, _contract_id) = make_env();
-        let creator = Address::generate(&env);
-
-        env.as_contract(&_contract_id, || {
-            let tags = Vec::new(&env);
-            let content_id = create_content(
-                &env,
-                &creator,
-                String::from_str(&env, "Test Nebula"),
-                String::from_str(&env, "A test nebula"),
-                Symbol::new(&env, CONTENT_TYPE_NEBULA),
-                Bytes::new(&env),
-                true,
-                tags,
-            )
-            .unwrap();
-            assert!(content_id > 0);
-
-            let content = get_content(&env, content_id).unwrap();
-            assert_eq!(content.creator, creator);
-        });
+    /// Run `f` in its own contract frame: each `require_auth()` for a given
+    /// address may be satisfied only once per frame (SDK 22+).
+    fn at<T>(env: &Env, id: &soroban_sdk::Address, f: impl FnOnce() -> T) -> T {
+        env.as_contract(id, f)
     }
 
-    // // #[test]
+    fn new_content(env: &Env, id: &soroban_sdk::Address, creator: &Address, title: &str) -> u64 {
+        at(env, id, || {
+            create_content(
+                env,
+                creator,
+                String::from_str(env, title),
+                String::from_str(env, "A test nebula"),
+                Symbol::new(env, CONTENT_TYPE_NEBULA),
+                Bytes::new(env),
+                true,
+                Vec::new(env),
+            )
+            .unwrap()
+        })
+    }
+
+    #[test]
+    fn test_create_content() {
+        let (env, id) = make_env();
+        let creator = Address::generate(&env);
+
+        let content_id = new_content(&env, &id, &creator, "Test Nebula");
+        assert!(content_id > 0);
+
+        let content = at(&env, &id, || get_content(&env, content_id).unwrap());
+        assert_eq!(content.creator, creator);
+    }
+
+    #[test]
     fn test_vote_content() {
-        let (env, _contract_id) = make_env();
+        let (env, id) = make_env();
         let creator = Address::generate(&env);
         let voter = Address::generate(&env);
 
-        env.as_contract(&_contract_id, || {
-            let tags = Vec::new(&env);
-            let content_id = create_content(
-                &env,
-                &creator,
-                String::from_str(&env, "Test"),
-                String::from_str(&env, "Desc"),
-                Symbol::new(&env, CONTENT_TYPE_NEBULA),
-                Bytes::new(&env),
-                true,
-                tags,
-            )
-            .unwrap();
+        let content_id = new_content(&env, &id, &creator, "Test");
 
-            // Need admin to approve first
-            set_admin(&env, &creator).unwrap();
-            approve_content(&env, &creator, content_id).unwrap();
+        // Need admin to approve first
+        at(&env, &id, || set_admin(&env, &creator).unwrap());
+        at(&env, &id, || approve_content(&env, &creator, content_id).unwrap());
 
-            vote_content(&env, &voter, content_id, 5).unwrap();
-            let result = get_vote_result(&env, content_id);
-            assert_eq!(result.total_votes, 1);
-        });
+        at(&env, &id, || vote_content(&env, &voter, content_id, 5).unwrap());
+        let result = at(&env, &id, || get_vote_result(&env, content_id));
+        assert_eq!(result.total_votes, 1);
     }
 
-    // // #[test]
+    #[test]
     fn test_set_admin_cannot_be_hijacked_after_init() {
         // Issue #237: set_admin previously let ANY caller overwrite the
         // admin at any time. Now it is a one-time initializer.
-        let (env, _contract_id) = make_env();
+        let (env, id) = make_env();
         let admin = Address::generate(&env);
         let attacker = Address::generate(&env);
 
-        env.as_contract(&_contract_id, || {
-            set_admin(&env, &admin).unwrap();
+        at(&env, &id, || set_admin(&env, &admin).unwrap());
 
-            let result = set_admin(&env, &attacker);
-            assert_eq!(result, Err(ContentToolsError::AlreadyInitialized));
+        let result = at(&env, &id, || set_admin(&env, &attacker));
+        assert_eq!(result, Err(ContentToolsError::AlreadyInitialized));
 
-            let result = approve_content(&env, &attacker, 1);
-            assert_eq!(result, Err(ContentToolsError::Unauthorized));
-        });
+        let result = at(&env, &id, || approve_content(&env, &attacker, 1));
+        assert_eq!(result, Err(ContentToolsError::Unauthorized));
     }
 }
