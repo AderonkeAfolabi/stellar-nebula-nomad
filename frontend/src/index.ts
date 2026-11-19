@@ -7,3 +7,5 @@ export * from './contexts/WebSocketContext';
 export * from './views/AnalyticsDashboard';
 export * from './utils/weather';
 export * from './views/WeatherPanel';
+export * from './utils/wormholes';
+export * from './views/WormholeNavigator';

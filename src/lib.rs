@@ -3078,6 +3078,46 @@ impl NebulaNomadContract {
         wormhole_traveler::verify_wormhole_link(&env, wormhole_id, provided_link)
     }
 
+    /// Jump through a wormhole and get the full outcome (risk, roll, exit).
+    pub fn jump_through_wormhole(
+        env: Env,
+        traveler: Address,
+        ship_id: u64,
+        wormhole_id: u64,
+    ) -> Result<wormhole_traveler::TravelOutcome, WormholeError> {
+        wormhole_traveler::jump_through_wormhole(&env, traveler, ship_id, wormhole_id)
+    }
+
+    /// Bail out back through the wormhole a ship just came through.
+    pub fn wormhole_emergency_exit(
+        env: Env,
+        traveler: Address,
+        ship_id: u64,
+    ) -> Result<wormhole_traveler::TravelOutcome, WormholeError> {
+        wormhole_traveler::emergency_exit(&env, traveler, ship_id)
+    }
+
+    /// Scan a nebula for wormholes; detected ones join the explorer's map.
+    pub fn scan_for_wormholes(env: Env, explorer: Address, nebula_id: u64) -> Vec<u64> {
+        wormhole_traveler::scan_for_wormholes(&env, explorer, nebula_id)
+    }
+
+    /// An explorer's wormhole map with live stability, risk and cost.
+    pub fn get_wormhole_map(
+        env: Env,
+        explorer: Address,
+    ) -> Vec<wormhole_traveler::WormholeMapEntry> {
+        wormhole_traveler::get_wormhole_map(&env, &explorer)
+    }
+
+    /// Open wormhole routes leaving a nebula.
+    pub fn get_wormhole_routes(
+        env: Env,
+        nebula_id: u64,
+    ) -> Vec<wormhole_traveler::WormholeMapEntry> {
+        wormhole_traveler::get_routes_from(&env, nebula_id)
+    }
+
     // ─── Player Alliance and Faction System (Issue #79) ──────────────────
 
     /// Found a new alliance with initial treasury.
