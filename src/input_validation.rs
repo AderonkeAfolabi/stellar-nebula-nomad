@@ -247,7 +247,8 @@ pub fn checked_deadline(now: u64, window: u64, min: u64, max: u64) -> Result<u64
     if window < min || window > max {
         return Err(ValidationError::InvalidTimestamp);
     }
-    now.checked_add(window).ok_or(ValidationError::InvalidTimestamp)
+    now.checked_add(window)
+        .ok_or(ValidationError::InvalidTimestamp)
 }
 
 /// Validate a list of basis-point shares: at most `max_entries` entries, no

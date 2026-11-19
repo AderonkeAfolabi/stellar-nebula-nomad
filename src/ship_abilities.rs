@@ -405,11 +405,6 @@ pub fn use_ability(
     }
     let ability = ability_opt.ok_or(PvPError::InvalidMove)?;
 
-    // Check cooldown
-    if !is_ability_ready(env, combat_id, player, ability_id) {
-        return Err(PvPError::InvalidMove);
-    }
-
     // Load combat state
     let combat_key = PvPDataKey::Combat(combat_id);
     let mut combat: CombatState = env
@@ -417,6 +412,16 @@ pub fn use_ability(
         .persistent()
         .get(&combat_key)
         .ok_or(PvPError::CombatNotFound)?;
+
+    // Only a participant may spend abilities in this combat; without this a
+    // third party could attack either side by passing an arbitrary address.
+    if *player != combat.player1 && *player != combat.player2 {
+        return Err(PvPError::Unauthorized);
+    }
+    // Check cooldown
+    if !is_ability_ready(env, combat_id, player, ability_id) {
+        return Err(PvPError::InvalidMove);
+    }
 
     let is_player1 = *player == combat.player1;
 

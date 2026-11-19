@@ -5,6 +5,10 @@
 //! operation, and that each DoS vector (combat, tournament registration,
 //! crafting, trading, minting, nebula generation) is actually wired to it.
 
+// Test code: pedantic style lints (too_many_lines, semicolon_if_nothing_returned, ...)
+// add noise without catching bugs here.
+#![allow(clippy::pedantic)]
+
 use soroban_sdk::{
     testutils::{Address as _, Ledger},
     vec, Address, Env, Symbol,
@@ -69,7 +73,11 @@ fn each_operation_is_blocked_after_its_limit_and_recovers_after_the_window() {
         for op in Operation::ALL {
             let cfg = get_rate_limit_config(&env, op.clone());
             for n in 0..cfg.max_calls {
-                assert_eq!(check_rate_limit(&env, &user, op.clone()), Ok(()), "{op:?} call {n}");
+                assert_eq!(
+                    check_rate_limit(&env, &user, op.clone()),
+                    Ok(()),
+                    "{op:?} call {n}"
+                );
             }
             assert_eq!(
                 check_rate_limit(&env, &user, op.clone()),
@@ -83,7 +91,11 @@ fn each_operation_is_blocked_after_its_limit_and_recovers_after_the_window() {
     advance(&env, 3601);
     env.as_contract(&id, || {
         for op in Operation::ALL {
-            assert_eq!(check_rate_limit(&env, &user, op.clone()), Ok(()), "{op:?} after window");
+            assert_eq!(
+                check_rate_limit(&env, &user, op.clone()),
+                Ok(()),
+                "{op:?} after window"
+            );
         }
     });
 }
@@ -97,8 +109,14 @@ fn limits_are_per_address_and_per_operation() {
             check_rate_limit(&env, &a, Operation::Crafting).unwrap();
         }
         assert!(check_rate_limit(&env, &a, Operation::Crafting).is_err());
-        assert!(check_rate_limit(&env, &b, Operation::Crafting).is_ok(), "other address");
-        assert!(check_rate_limit(&env, &a, Operation::Trading).is_ok(), "other operation");
+        assert!(
+            check_rate_limit(&env, &b, Operation::Crafting).is_ok(),
+            "other address"
+        );
+        assert!(
+            check_rate_limit(&env, &a, Operation::Trading).is_ok(),
+            "other operation"
+        );
     });
 }
 
@@ -110,10 +128,20 @@ fn admin_can_tune_limits_and_non_admin_cannot() {
         Address::generate(&env),
         Address::generate(&env),
     );
-    at(&env, &id, || access_control::init_roles(&env, admin.clone()).unwrap());
-    let tight = RateLimitConfig { max_calls: 2, window_seconds: 120 };
+    at(&env, &id, || {
+        access_control::init_roles(&env, admin.clone()).unwrap()
+    });
+    let tight = RateLimitConfig {
+        max_calls: 2,
+        window_seconds: 120,
+    };
     assert_eq!(
-        at(&env, &id, || set_rate_limit_config(&env, &intruder, Operation::Trading, tight.clone())),
+        at(&env, &id, || set_rate_limit_config(
+            &env,
+            &intruder,
+            Operation::Trading,
+            tight.clone()
+        )),
         Err(RateLimitError::Unauthorized)
     );
     assert_eq!(
@@ -121,7 +149,10 @@ fn admin_can_tune_limits_and_non_admin_cannot() {
             &env,
             &admin,
             Operation::Trading,
-            RateLimitConfig { max_calls: 0, window_seconds: 60 }
+            RateLimitConfig {
+                max_calls: 0,
+                window_seconds: 60
+            }
         )),
         Err(RateLimitError::InvalidConfig)
     );
@@ -148,13 +179,18 @@ fn admin_can_tune_limits_and_non_admin_cannot() {
 fn huge_window_does_not_overflow() {
     let (env, id) = setup();
     let (admin, user) = (Address::generate(&env), Address::generate(&env));
-    at(&env, &id, || access_control::init_roles(&env, admin.clone()).unwrap());
+    at(&env, &id, || {
+        access_control::init_roles(&env, admin.clone()).unwrap()
+    });
     at(&env, &id, || {
         set_rate_limit_config(
             &env,
             &admin,
             Operation::Crafting,
-            RateLimitConfig { max_calls: 1, window_seconds: u64::MAX },
+            RateLimitConfig {
+                max_calls: 1,
+                window_seconds: u64::MAX,
+            },
         )
         .unwrap()
     });
@@ -171,14 +207,22 @@ fn crafting_is_rate_limited() {
     let (env, id) = setup();
     let player = Address::generate(&env);
     let max = Operation::Crafting.default_config().max_calls;
-    let craft = || at(&env, &id, || crafting::craft(env.clone(), player.clone(), 9_999));
+    let craft = || {
+        at(&env, &id, || {
+            crafting::craft(env.clone(), player.clone(), 9_999)
+        })
+    };
     for _ in 0..max {
         // Unknown recipe: fails *after* the limiter, proving the call was counted.
         assert_eq!(craft(), Err(CraftingError::RecipeNotFound));
     }
     assert_eq!(craft(), Err(CraftingError::RateLimitExceeded));
     assert_eq!(
-        at(&env, &id, || crafting::craft_with_overcharge(env.clone(), player.clone(), 9_999)),
+        at(&env, &id, || crafting::craft_with_overcharge(
+            env.clone(),
+            player.clone(),
+            9_999
+        )),
         Err(CraftingError::RateLimitExceeded),
         "overcharge variant shares the crafting budget"
     );
@@ -212,7 +256,9 @@ fn tournament_registration_is_rate_limited() {
         }));
     }
     let reg = |who: &Address, t: u64| {
-        at(&env, &id, || tournament::register_for_tournament(&env, who, t))
+        at(&env, &id, || {
+            tournament::register_for_tournament(&env, who, t)
+        })
     };
     for t in ids.iter().take(max as usize) {
         assert!(reg(&player, *t).is_ok());
@@ -242,17 +288,28 @@ fn trading_is_rate_limited() {
         is_stop_loss: false,
     };
     for _ in 0..max {
-        let r = at(&env, &id, || trading::place_limit_order(&env, &trader, order()));
+        let r = at(&env, &id, || {
+            trading::place_limit_order(&env, &trader, order())
+        });
         assert_ne!(r, Err(TradingError::RateLimitExceeded));
     }
     assert_eq!(
-        at(&env, &id, || trading::place_limit_order(&env, &trader, order())),
+        at(&env, &id, || trading::place_limit_order(
+            &env,
+            &trader,
+            order()
+        )),
         Err(TradingError::RateLimitExceeded)
     );
     // AMM entry points draw from the same Trading budget.
     assert_eq!(
         at(&env, &id, || trading::swap_exact_input(
-            &env, &trader, dust.clone(), 1, 0, vec![&env, 1u64]
+            &env,
+            &trader,
+            dust.clone(),
+            1,
+            0,
+            vec![&env, 1u64]
         )),
         Err(AmmError::RateLimitExceeded)
     );

@@ -432,3 +432,7 @@ path = "tests/security/rate_limiting_tests.rs"
 [[test]]
 name = "security_input_validation"
 path = "tests/security/input_validation_tests.rs"
+
+[[test]]
+name = "security_access_control"
+path = "tests/security/access_control_tests.rs"

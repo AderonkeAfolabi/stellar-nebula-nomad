@@ -472,7 +472,11 @@ pub fn create_challenge(
     stake: i128,
 ) -> Result<u64, PvPError> {
     challenger.require_auth();
-    crate::rate_limiter::check_rate_limit(env, challenger, crate::rate_limiter::Operation::CombatInitiation)?;
+    crate::rate_limiter::check_rate_limit(
+        env,
+        challenger,
+        crate::rate_limiter::Operation::CombatInitiation,
+    )?;
 
     crate::input_validation::check_distinct_addresses(challenger, opponent)
         .map_err(|_| PvPError::InvalidCombatParams)?;
@@ -520,7 +524,11 @@ pub fn create_challenge(
 
 pub fn accept_challenge(env: &Env, caller: &Address, challenge_id: u64) -> Result<u64, PvPError> {
     caller.require_auth();
-    crate::rate_limiter::check_rate_limit(env, caller, crate::rate_limiter::Operation::CombatInitiation)?;
+    crate::rate_limiter::check_rate_limit(
+        env,
+        caller,
+        crate::rate_limiter::Operation::CombatInitiation,
+    )?;
 
     let key = PvPDataKey::PvpChallenge(challenge_id);
     let mut challenge: Challenge = env
@@ -910,7 +918,11 @@ pub fn join_matchmaking(
     preferred_stake: i128,
 ) -> Result<(), PvPError> {
     player.require_auth();
-    crate::rate_limiter::check_rate_limit(env, player, crate::rate_limiter::Operation::CombatInitiation)?;
+    crate::rate_limiter::check_rate_limit(
+        env,
+        player,
+        crate::rate_limiter::Operation::CombatInitiation,
+    )?;
 
     validate_stake(preferred_stake)?;
 

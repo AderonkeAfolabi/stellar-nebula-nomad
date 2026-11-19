@@ -301,7 +301,9 @@ fn indexer_role() -> Symbol {
 
 /// Fetch the current admin address.
 fn get_admin(env: &Env) -> Option<Address> {
-    env.storage().persistent().get(&AccessControlKey::AccessControlAdmin)
+    env.storage()
+        .persistent()
+        .get(&AccessControlKey::AccessControlAdmin)
 }
 
 /// Set the admin address (used only during initialization and transfer).
@@ -778,11 +780,21 @@ pub fn transfer_admin(
 
     let admin_sym = admin_role();
 
-    // Revoke admin role from old admin
-    revoke_role(env, caller.clone(), admin_sym.clone(), old_admin.clone())?;
-
-    // Grant admin role to new admin (no expiry)
-    grant_role(env, caller.clone(), admin_sym, new_admin.clone(), None)?;
+    // Move the admin role directly through the storage helpers. Going through
+    // `revoke_role`/`grant_role` would call `caller.require_auth()` twice more
+    // in this same frame, which the host rejects (`Auth, ExistingValue`), so
+    // the transfer could never succeed on-chain.
+    delete_role_record(env, &admin_sym, &old_admin);
+    env.events().publish(
+        (symbol_short!("rbac"), symbol_short!("revoke")),
+        (admin_sym.clone(), old_admin.clone()),
+    );
+    register_known_role(env, &admin_sym);
+    set_role_record(env, &admin_sym, &new_admin, &RoleRecord::new(None));
+    env.events().publish(
+        (symbol_short!("rbac"), symbol_short!("grant")),
+        (admin_sym, new_admin.clone(), Option::<u32>::None),
+    );
 
     // Update the admin address
     set_admin(env, &new_admin);
@@ -993,9 +1005,10 @@ pub fn create_proposal(
         approval_count: 1, // Proposer auto-approves
     };
 
-    env.storage()
-        .persistent()
-        .set(&AccessControlKey::AccessControlProposal(proposal_id), &proposal);
+    env.storage().persistent().set(
+        &AccessControlKey::AccessControlProposal(proposal_id),
+        &proposal,
+    );
 
     // Record proposer's approval
     env.storage().persistent().set(
@@ -1084,9 +1097,10 @@ pub fn approve_proposal(
 
     proposal.approval_count += 1;
 
-    env.storage()
-        .persistent()
-        .set(&AccessControlKey::AccessControlProposal(proposal_id), &proposal);
+    env.storage().persistent().set(
+        &AccessControlKey::AccessControlProposal(proposal_id),
+        &proposal,
+    );
 
     env.events().publish(
         (symbol_short!("multisig"), symbol_short!("approve")),
@@ -1167,9 +1181,10 @@ pub fn execute_proposal(
     }
 
     proposal.executed = true;
-    env.storage()
-        .persistent()
-        .set(&AccessControlKey::AccessControlProposal(proposal_id), &proposal);
+    env.storage().persistent().set(
+        &AccessControlKey::AccessControlProposal(proposal_id),
+        &proposal,
+    );
 
     env.events().publish(
         (symbol_short!("multisig"), symbol_short!("execute")),

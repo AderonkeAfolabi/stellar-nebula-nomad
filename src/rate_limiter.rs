@@ -79,9 +79,7 @@ impl Operation {
             Operation::RouteCalculation => RateLimitConfig::default_route_calculation(),
             Operation::ShipRepair => RateLimitConfig::default_ship_repair(),
             Operation::CombatInitiation => RateLimitConfig::default_combat_initiation(),
-            Operation::TournamentRegistration => {
-                RateLimitConfig::default_tournament_registration()
-            }
+            Operation::TournamentRegistration => RateLimitConfig::default_tournament_registration(),
             Operation::Crafting => RateLimitConfig::default_crafting(),
             Operation::Trading => RateLimitConfig::default_trading(),
         }

@@ -106,7 +106,9 @@ impl crate::error_standard::StandardContractError for TradingError {
             Self::NotOrderOwner => (ErrorKind::Authorization, false),
             Self::OrderCapReached => (ErrorKind::ResourceLimit, false),
             Self::Reentrancy => (ErrorKind::Conflict, false),
-            Self::DailyTradeCapExceeded | Self::RateLimitExceeded => (ErrorKind::ResourceLimit, true),
+            Self::DailyTradeCapExceeded | Self::RateLimitExceeded => {
+                (ErrorKind::ResourceLimit, true)
+            }
         };
         crate::error_standard::ErrorDescriptor {
             module: "trading",
@@ -453,7 +455,9 @@ impl crate::error_standard::StandardContractError for AmmError {
             Self::InvalidAmount | Self::InvalidRoute | Self::ZeroLiquidity => {
                 (ErrorKind::Validation, false)
             }
-            Self::DailyTradeCapExceeded | Self::RateLimitExceeded => (ErrorKind::ResourceLimit, true),
+            Self::DailyTradeCapExceeded | Self::RateLimitExceeded => {
+                (ErrorKind::ResourceLimit, true)
+            }
         };
         crate::error_standard::ErrorDescriptor {
             module: "trading",
@@ -698,14 +702,12 @@ fn add_liquidity_unguarded(
     // Mint LP tokens to provider
     let lp_key = AmmKey::LpBalance(pool_id, provider.clone());
     let current_balance: i128 = env.storage().persistent().get(&lp_key).unwrap_or(0);
-    env.storage()
-        .persistent()
-        .set(
-            &lp_key,
-            &current_balance
-                .checked_add(lp_mint)
-                .ok_or(AmmError::InvalidAmount)?,
-        );
+    env.storage().persistent().set(
+        &lp_key,
+        &current_balance
+            .checked_add(lp_mint)
+            .ok_or(AmmError::InvalidAmount)?,
+    );
 
     // Update total supply key
     env.storage()
@@ -866,9 +868,8 @@ pub fn swap_exact_input(
                 return Err(AmmError::InsufficientLiquidity);
             }
 
-            let output =
-                get_output_amount(current_amount, reserve_in, reserve_out, pool.fee_bps)
-                    .ok_or(AmmError::InvalidAmount)?;
+            let output = get_output_amount(current_amount, reserve_in, reserve_out, pool.fee_bps)
+                .ok_or(AmmError::InvalidAmount)?;
             if output <= 0 {
                 return Err(AmmError::InsufficientLiquidity);
             }

@@ -254,7 +254,11 @@ pub fn register_for_tournament(
     tournament_id: u64,
 ) -> Result<u32, TournamentError> {
     player.require_auth();
-    crate::rate_limiter::check_rate_limit(env, player, crate::rate_limiter::Operation::TournamentRegistration)?;
+    crate::rate_limiter::check_rate_limit(
+        env,
+        player,
+        crate::rate_limiter::Operation::TournamentRegistration,
+    )?;
 
     let mut tournament = get_tournament(env, tournament_id)?;
     if tournament.status != symbol_short!("reg") {
