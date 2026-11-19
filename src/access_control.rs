@@ -280,7 +280,7 @@ pub enum ProposalOperation {
 // ═══════════════════════════════════════════════════════════════════════════════
 
 /// Maximum number of addresses that can receive a role in a single batch grant call.
-pub const BATCH_GRANT_LIMIT: usize = 5;
+pub const BATCH_GRANT_LIMIT: u32 = 5;
 
 // Default role names as Symbols. Using symbol_short!() for brevity.
 pub(crate) fn admin_role() -> Symbol {
@@ -583,7 +583,7 @@ pub fn grant_role_batch(
     expiry: Option<u32>,
 ) -> Result<(), AccessControlError> {
     // Check batch size FIRST before any other operation
-    if grantees.len() as usize > BATCH_GRANT_LIMIT {
+    if grantees.len() > BATCH_GRANT_LIMIT {
         return Err(AccessControlError::BatchLimitExceeded);
     }
 
