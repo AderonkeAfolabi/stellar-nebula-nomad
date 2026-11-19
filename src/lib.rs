@@ -2795,6 +2795,60 @@ impl NebulaNomadContract {
         constellation_mapper::get_constellation_count(&env)
     }
 
+    /// Name a constellation, anchor it to a region and attach lore (recorder, once).
+    pub fn annotate_constellation(
+        env: Env,
+        recorder: Address,
+        constellation_id: u64,
+        name: String,
+        anchor_region: u64,
+        lore: String,
+    ) -> Result<constellation_mapper::ConstellationMeta, ConstellationError> {
+        constellation_mapper::annotate_constellation(
+            &env,
+            &recorder,
+            constellation_id,
+            name,
+            anchor_region,
+            lore,
+        )
+    }
+
+    /// Recognize a partial or noisy star observation.
+    pub fn recognize_constellation(
+        env: Env,
+        observed: Vec<BytesN<32>>,
+    ) -> Result<constellation_mapper::Recognition, ConstellationError> {
+        constellation_mapper::recognize_pattern(&env, &observed)
+    }
+
+    /// Recognize an observation and point toward its anchor region.
+    pub fn get_navigation_aid(
+        env: Env,
+        observed: Vec<BytesN<32>>,
+        current_region: u64,
+    ) -> Result<constellation_mapper::NavigationAid, ConstellationError> {
+        constellation_mapper::navigation_aid(&env, &observed, current_region)
+    }
+
+    /// Sight a constellation for discovery bonuses and collection progress.
+    pub fn sight_constellation(
+        env: Env,
+        observer: Address,
+        observed: Vec<BytesN<32>>,
+        region_id: u64,
+    ) -> Result<constellation_mapper::SightingResult, ConstellationError> {
+        constellation_mapper::sight_constellation(&env, &observer, &observed, region_id)
+    }
+
+    /// A player's constellation collection progress.
+    pub fn get_constellation_collection(
+        env: Env,
+        player: Address,
+    ) -> constellation_mapper::CollectionProgress {
+        constellation_mapper::get_collection(&env, &player)
+    }
+
     // ─── Quantum Entanglement Comms (Issue #73) ───────────────────────────
 
     /// Establish an entanglement pair between two ships.
