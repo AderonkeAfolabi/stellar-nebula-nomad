@@ -81,7 +81,7 @@ pub enum EloKey {
     GamesPlayed(Address),
     RatingHistory(Address, u32),
     SeasonConfig,
-    Leaderboard,
+    EloLeaderboard,
 }
 
 // ── Tier Logic ────────────────────────────────────────────────────────────────

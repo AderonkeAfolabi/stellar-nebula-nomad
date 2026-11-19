@@ -14,7 +14,7 @@ pub const MAX_MATCH_BURST: u32 = 15;
 #[contracttype]
 pub enum ConstellationKey {
     /// Auto-incrementing constellation ID.
-    Counter,
+    ConstellationCounter,
     /// Constellation data by ID.
     Constellation(u64),
 }
@@ -115,7 +115,7 @@ pub fn record_constellation(
     let id: u64 = env
         .storage()
         .instance()
-        .get(&ConstellationKey::Counter)
+        .get(&ConstellationKey::ConstellationCounter)
         .unwrap_or(0);
 
     let now = env.ledger().timestamp();
@@ -134,7 +134,7 @@ pub fn record_constellation(
         .set(&ConstellationKey::Constellation(id), &constellation);
     env.storage()
         .instance()
-        .set(&ConstellationKey::Counter, &(id + 1));
+        .set(&ConstellationKey::ConstellationCounter, &(id + 1));
 
     env.events().publish(
         (symbol_short!("const"), symbol_short!("record")),
@@ -159,7 +159,7 @@ pub fn match_constellation(
     let total: u64 = env
         .storage()
         .instance()
-        .get(&ConstellationKey::Counter)
+        .get(&ConstellationKey::ConstellationCounter)
         .unwrap_or(0);
 
     if total == 0 {
@@ -249,6 +249,6 @@ pub fn get_constellation(
 pub fn get_constellation_count(env: &Env) -> u64 {
     env.storage()
         .instance()
-        .get(&ConstellationKey::Counter)
+        .get(&ConstellationKey::ConstellationCounter)
         .unwrap_or(0)
 }

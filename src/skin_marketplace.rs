@@ -20,7 +20,7 @@ pub enum ListingStatus {
 #[derive(Clone)]
 #[contracttype]
 pub enum MarketplaceKey {
-    Listing(u64),
+    SkinMarketListing(u64),
     PlayerListings(Address),
     SkinListing(u64), // skin_id -> listing_id
 }
@@ -98,7 +98,7 @@ pub fn list_skin(
         buyer: None,
     };
 
-    env.storage().persistent().set(&MarketplaceKey::Listing(id), &listing);
+    env.storage().persistent().set(&MarketplaceKey::SkinMarketListing(id), &listing);
     env.storage().persistent().set(&MarketplaceKey::SkinListing(skin_id), &id);
     Ok(id)
 }
@@ -114,7 +114,7 @@ pub fn buy_skin(
     let mut listing = env
         .storage()
         .persistent()
-        .get::<MarketplaceKey, SkinListing>(&MarketplaceKey::Listing(listing_id))
+        .get::<MarketplaceKey, SkinListing>(&MarketplaceKey::SkinMarketListing(listing_id))
         .ok_or(MarketplaceError::ListingNotFound)?;
 
     if listing.status != ListingStatus::Active {
@@ -125,13 +125,13 @@ pub fn buy_skin(
     }
     if env.ledger().timestamp() > listing.expires_at {
         listing.status = ListingStatus::Expired;
-        env.storage().persistent().set(&MarketplaceKey::Listing(listing_id), &listing);
+        env.storage().persistent().set(&MarketplaceKey::SkinMarketListing(listing_id), &listing);
         return Err(MarketplaceError::ListingExpired);
     }
 
     listing.status = ListingStatus::Sold;
     listing.buyer = Some(buyer.clone());
-    env.storage().persistent().set(&MarketplaceKey::Listing(listing_id), &listing);
+    env.storage().persistent().set(&MarketplaceKey::SkinMarketListing(listing_id), &listing);
 
     // Clean up skin listing index
     env.storage().persistent().remove(&MarketplaceKey::SkinListing(listing.skin_id));
@@ -150,7 +150,7 @@ pub fn cancel_listing(
     let mut listing = env
         .storage()
         .persistent()
-        .get::<MarketplaceKey, SkinListing>(&MarketplaceKey::Listing(listing_id))
+        .get::<MarketplaceKey, SkinListing>(&MarketplaceKey::SkinMarketListing(listing_id))
         .ok_or(MarketplaceError::ListingNotFound)?;
 
     if listing.seller != *seller {
@@ -158,7 +158,7 @@ pub fn cancel_listing(
     }
 
     listing.status = ListingStatus::Cancelled;
-    env.storage().persistent().set(&MarketplaceKey::Listing(listing_id), &listing);
+    env.storage().persistent().set(&MarketplaceKey::SkinMarketListing(listing_id), &listing);
     env.storage().persistent().remove(&MarketplaceKey::SkinListing(listing.skin_id));
 
     Ok(())
@@ -166,7 +166,7 @@ pub fn cancel_listing(
 
 /// Get a listing by ID.
 pub fn get_listing(env: &Env, listing_id: u64) -> Option<SkinListing> {
-    env.storage().persistent().get(&MarketplaceKey::Listing(listing_id))
+    env.storage().persistent().get(&MarketplaceKey::SkinMarketListing(listing_id))
 }
 
 /// Search listings by max price.

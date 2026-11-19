@@ -38,6 +38,52 @@ pub enum Operation {
     RouteCalculation,
     /// `repair_ship` — paid hull repair, a resource sink (Issue #453).
     ShipRepair,
+    /// PvP challenge creation / acceptance and matchmaking queue joins
+    /// (Issue #610). Combat start is only reachable through these.
+    CombatInitiation,
+    /// `register_for_tournament` — entry-fee escrow plus registrant list growth.
+    TournamentRegistration,
+    /// `craft` / `craft_with_overcharge` — recipe execution (Issue #610).
+    Crafting,
+    /// Limit orders, AMM swaps and liquidity changes (Issue #610).
+    Trading,
+}
+
+impl Operation {
+    /// Every rate-limited operation, for enumeration in tests and tooling.
+    pub const ALL: [Operation; 12] = [
+        Operation::NebulaGeneration,
+        Operation::ResourceMinting,
+        Operation::ShipUpgrade,
+        Operation::NebulaScan,
+        Operation::BatchOperation,
+        Operation::PrivacyCommit,
+        Operation::RouteCalculation,
+        Operation::ShipRepair,
+        Operation::CombatInitiation,
+        Operation::TournamentRegistration,
+        Operation::Crafting,
+        Operation::Trading,
+    ];
+
+    /// Built-in limit used until an admin overrides it with
+    /// [`set_rate_limit_config`].
+    pub fn default_config(&self) -> RateLimitConfig {
+        match self {
+            Operation::NebulaGeneration => RateLimitConfig::default_nebula_generation(),
+            Operation::ResourceMinting => RateLimitConfig::default_resource_minting(),
+            Operation::ShipUpgrade => RateLimitConfig::default_ship_upgrade(),
+            Operation::NebulaScan => RateLimitConfig::default_nebula_scan(),
+            Operation::BatchOperation => RateLimitConfig::default_batch_operation(),
+            Operation::PrivacyCommit => RateLimitConfig::default_privacy_commit(),
+            Operation::RouteCalculation => RateLimitConfig::default_route_calculation(),
+            Operation::ShipRepair => RateLimitConfig::default_ship_repair(),
+            Operation::CombatInitiation => RateLimitConfig::default_combat_initiation(),
+            Operation::TournamentRegistration => RateLimitConfig::default_tournament_registration(),
+            Operation::Crafting => RateLimitConfig::default_crafting(),
+            Operation::Trading => RateLimitConfig::default_trading(),
+        }
+    }
 }
 
 // ── Config types ──────────────────────────────────────────────
@@ -102,6 +148,35 @@ impl RateLimitConfig {
             window_seconds: 300,
         } // 3 repairs / 5 min
     }
+    /// Challenges, accepts and queue joins: a duel is minutes long, so 10 per
+    /// 5 minutes never blocks real play but stops challenge-spam.
+    pub fn default_combat_initiation() -> Self {
+        Self {
+            max_calls: 10,
+            window_seconds: 300,
+        } // 10 initiations / 5 min
+    }
+    /// Players register for a handful of tournaments at a time.
+    pub fn default_tournament_registration() -> Self {
+        Self {
+            max_calls: 5,
+            window_seconds: 3600,
+        } // 5 registrations / hour
+    }
+    /// Crafting is a core loop, so the budget is generous but bounded.
+    pub fn default_crafting() -> Self {
+        Self {
+            max_calls: 20,
+            window_seconds: 60,
+        } // 20 crafts / minute
+    }
+    /// Active traders place several orders/swaps per minute.
+    pub fn default_trading() -> Self {
+        Self {
+            max_calls: 30,
+            window_seconds: 60,
+        } // 30 trades / minute
+    }
 }
 
 // ── Storage key ───────────────────────────────────────────────
@@ -110,7 +185,7 @@ pub enum RateLimitKey {
     /// Tracks (call_count, window_start) per address + operation.
     Entry(Address, Operation),
     /// Admin-configurable limits per operation.
-    Config(Operation),
+    RateLimitConfigKey(Operation),
 }
 
 // ── Error ─────────────────────────────────────────────────────
@@ -164,17 +239,8 @@ pub fn check_rate_limit(env: &Env, caller: &Address, op: Operation) -> Result<()
     let config: RateLimitConfig = env
         .storage()
         .instance()
-        .get(&RateLimitKey::Config(op.clone()))
-        .unwrap_or_else(|| match op {
-            Operation::NebulaGeneration => RateLimitConfig::default_nebula_generation(),
-            Operation::ResourceMinting => RateLimitConfig::default_resource_minting(),
-            Operation::ShipUpgrade => RateLimitConfig::default_ship_upgrade(),
-            Operation::NebulaScan => RateLimitConfig::default_nebula_scan(),
-            Operation::BatchOperation => RateLimitConfig::default_batch_operation(),
-            Operation::PrivacyCommit => RateLimitConfig::default_privacy_commit(),
-            Operation::RouteCalculation => RateLimitConfig::default_route_calculation(),
-            Operation::ShipRepair => RateLimitConfig::default_ship_repair(),
-        });
+        .get(&RateLimitKey::RateLimitConfigKey(op.clone()))
+        .unwrap_or_else(|| op.default_config());
 
     let now = env.ledger().timestamp();
     let entry_key = RateLimitKey::Entry(caller.clone(), op.clone());
@@ -189,7 +255,7 @@ pub fn check_rate_limit(env: &Env, caller: &Address, op: Operation) -> Result<()
         });
 
     // Roll window forward if it has expired
-    if now >= state.window_start + config.window_seconds {
+    if now >= state.window_start.saturating_add(config.window_seconds) {
         state = WindowState {
             call_count: 0,
             window_start: now,
@@ -206,10 +272,18 @@ pub fn check_rate_limit(env: &Env, caller: &Address, op: Operation) -> Result<()
     }
 
     // Increment and persist — TTL = window_seconds + 1 ledger
-    state.call_count += 1;
+    state.call_count = state.call_count.saturating_add(1);
     env.storage().temporary().set(&entry_key, &state);
 
     Ok(())
+}
+
+/// Effective limit for `op`: the admin override if set, else the built-in default.
+pub fn get_rate_limit_config(env: &Env, op: Operation) -> RateLimitConfig {
+    env.storage()
+        .instance()
+        .get(&RateLimitKey::RateLimitConfigKey(op.clone()))
+        .unwrap_or_else(|| op.default_config())
 }
 
 /// Admin function: update rate limit config for an operation.
@@ -231,7 +305,7 @@ pub fn set_rate_limit_config(
     }
     env.storage()
         .instance()
-        .set(&RateLimitKey::Config(op), &config);
+        .set(&RateLimitKey::RateLimitConfigKey(op), &config);
     Ok(())
 }
 

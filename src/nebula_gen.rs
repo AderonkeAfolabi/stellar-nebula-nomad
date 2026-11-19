@@ -162,7 +162,7 @@ pub struct NebulaConfig {
 #[contracttype]
 #[derive(Clone)]
 pub enum DataKey {
-    Config,
+    NebulaGenConfig,
     /// Most-recent layout for a ship, keyed by ship_id.
     ActiveLayout(u64),
 }
@@ -297,7 +297,7 @@ impl NebulaGen {
         max_size: u32,
         layout_ttl: u64,
     ) -> Result<(), NebulaError> {
-        if env.storage().instance().has(&DataKey::Config) {
+        if env.storage().instance().has(&DataKey::NebulaGenConfig) {
             return Err(NebulaError::AlreadyInitialized);
         }
         admin.require_auth();
@@ -311,7 +311,7 @@ impl NebulaGen {
         };
         let clamped = default_size.max(min_size).min(max_size);
         env.storage().instance().set(
-            &DataKey::Config,
+            &DataKey::NebulaGenConfig,
             &NebulaConfig {
                 admin,
                 default_size: clamped,
@@ -538,7 +538,7 @@ impl NebulaGen {
             return Err(NebulaError::InvalidTtl);
         }
         config.layout_ttl = new_ttl;
-        env.storage().instance().set(&DataKey::Config, &config);
+        env.storage().instance().set(&DataKey::NebulaGenConfig, &config);
         Ok(())
     }
 
@@ -591,7 +591,7 @@ impl NebulaGen {
     fn require_config(env: &Env) -> Result<NebulaConfig, NebulaError> {
         env.storage()
             .instance()
-            .get(&DataKey::Config)
+            .get(&DataKey::NebulaGenConfig)
             .ok_or(NebulaError::NotInitialized)
     }
 
@@ -608,7 +608,7 @@ impl NebulaGen {
         let ttl = env
             .storage()
             .instance()
-            .get::<DataKey, NebulaConfig>(&DataKey::Config)
+            .get::<DataKey, NebulaConfig>(&DataKey::NebulaGenConfig)
             .map_or(DEFAULT_LAYOUT_TTL, |c| c.layout_ttl);
 
         if is_expired(env.ledger().timestamp(), layout.generated_at, ttl) {

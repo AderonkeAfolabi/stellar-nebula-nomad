@@ -68,7 +68,7 @@ pub enum ContentDataKey {
     /// Content by creator.
     CreatorContent(Address),
     /// Content vote by (content_id, voter).
-    Vote(u64, Address),
+    ContentVote(u64, Address),
     /// Content votes count.
     VoteCount(u64),
     /// Content rating sum.
@@ -76,7 +76,7 @@ pub enum ContentDataKey {
     /// Content rating count.
     RatingCount(u64),
     /// Admin address.
-    Admin,
+    ContentAdmin,
     /// Content status.
     Status(u64),
     /// Marketplace listing.
@@ -169,7 +169,7 @@ pub fn set_admin(env: &Env, admin: &Address) -> Result<(), ContentToolsError> {
     }
     env.storage()
         .persistent()
-        .set(&ContentDataKey::Admin, admin);
+        .set(&ContentDataKey::ContentAdmin, admin);
     env.events().publish(
         (symbol_short!("ct"), symbol_short!("cnt_admn")),
         (Option::<Address>::None, admin.clone()),
@@ -178,7 +178,7 @@ pub fn set_admin(env: &Env, admin: &Address) -> Result<(), ContentToolsError> {
 }
 
 fn get_admin(env: &Env) -> Option<Address> {
-    env.storage().persistent().get(&ContentDataKey::Admin)
+    env.storage().persistent().get(&ContentDataKey::ContentAdmin)
 }
 
 fn require_admin(env: &Env, caller: &Address) -> Result<(), ContentToolsError> {
@@ -468,7 +468,7 @@ pub fn vote_content(
         return Err(ContentToolsError::ContentRejected);
     }
 
-    let vote_key = ContentDataKey::Vote(content_id, voter.clone());
+    let vote_key = ContentDataKey::ContentVote(content_id, voter.clone());
     if env.storage().persistent().has(&vote_key) {
         return Err(ContentToolsError::AlreadyVoted);
     }

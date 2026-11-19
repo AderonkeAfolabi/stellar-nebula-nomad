@@ -83,7 +83,7 @@ pub fn create_course(
 #[contracttype]
 pub enum RaceKey {
     Course(u64),
-    Session(u64),
+    RaceSession(u64),
 }
 
 /// Create a race session.
@@ -114,7 +114,7 @@ pub fn create_race(
         max_players,
     };
 
-    env.storage().persistent().set(&RaceKey::Session(id), &session);
+    env.storage().persistent().set(&RaceKey::RaceSession(id), &session);
     Ok(id)
 }
 
@@ -124,7 +124,7 @@ pub fn join_race(env: &Env, player: &Address, race_id: u64) -> Result<(), RaceEr
     let mut session = env
         .storage()
         .persistent()
-        .get::<RaceKey, RaceSession>(&RaceKey::Session(race_id))
+        .get::<RaceKey, RaceSession>(&RaceKey::RaceSession(race_id))
         .ok_or(RaceError::RaceNotFound)?;
 
     if session.players.len() >= session.max_players {
@@ -135,7 +135,7 @@ pub fn join_race(env: &Env, player: &Address, race_id: u64) -> Result<(), RaceEr
     }
 
     session.players.push_back(player.clone());
-    env.storage().persistent().set(&RaceKey::Session(race_id), &session);
+    env.storage().persistent().set(&RaceKey::RaceSession(race_id), &session);
     Ok(())
 }
 
@@ -149,7 +149,7 @@ pub fn record_finish(
     let mut session = env
         .storage()
         .persistent()
-        .get::<RaceKey, RaceSession>(&RaceKey::Session(race_id))
+        .get::<RaceKey, RaceSession>(&RaceKey::RaceSession(race_id))
         .ok_or(RaceError::RaceNotFound)?;
 
     session.finish_times.push_back((player.clone(), time_ms));
@@ -167,6 +167,6 @@ pub fn record_finish(
         }
     }
 
-    env.storage().persistent().set(&RaceKey::Session(race_id), &session);
+    env.storage().persistent().set(&RaceKey::RaceSession(race_id), &session);
     Ok(())
 }

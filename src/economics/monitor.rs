@@ -25,7 +25,7 @@ pub struct ResourceMetrics {
 #[contracttype]
 #[derive(Clone)]
 pub enum EconKey {
-    Metrics,
+    EconMonitorMetrics,
     ResourceMetrics(Symbol),
     SupplyHistory,
 }
@@ -40,7 +40,7 @@ pub fn initialize_monitor(env: &Env, admin: &Address) {
         inflation_rate_bps: 500, // 5% default
         last_update: env.ledger().timestamp(),
     };
-    env.storage().persistent().set(&EconKey::Metrics, &metrics);
+    env.storage().persistent().set(&EconKey::EconMonitorMetrics, &metrics);
 }
 
 /// Update token supply metrics
@@ -56,7 +56,7 @@ pub fn update_supply_metrics(
     let mut metrics: EconomicMetrics =
         env.storage()
             .persistent()
-            .get(&EconKey::Metrics)
+            .get(&EconKey::EconMonitorMetrics)
             .unwrap_or(EconomicMetrics {
                 total_supply: 0,
                 circulating_supply: 0,
@@ -70,7 +70,7 @@ pub fn update_supply_metrics(
     metrics.staked_supply = staked_supply;
     metrics.last_update = env.ledger().timestamp();
 
-    env.storage().persistent().set(&EconKey::Metrics, &metrics);
+    env.storage().persistent().set(&EconKey::EconMonitorMetrics, &metrics);
 
     env.events().publish(
         (symbol_short!("econ"), symbol_short!("supply")),
@@ -110,7 +110,7 @@ pub fn track_resource_activity(
 pub fn get_metrics(env: &Env) -> EconomicMetrics {
     env.storage()
         .persistent()
-        .get(&EconKey::Metrics)
+        .get(&EconKey::EconMonitorMetrics)
         .unwrap_or(EconomicMetrics {
             total_supply: 0,
             circulating_supply: 0,

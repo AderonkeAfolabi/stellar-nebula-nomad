@@ -172,7 +172,7 @@ impl StandardContractError for AccessControlError {
 #[contracttype]
 pub enum AccessControlKey {
     /// Singleton: current admin address.
-    Admin,
+    AccessControlAdmin,
     /// Role membership: (role Symbol, member Address) -> RoleRecord.
     RoleMember(Symbol, Address),
     /// Permission grant: (role Symbol, action Symbol) -> bool.
@@ -182,11 +182,11 @@ pub enum AccessControlKey {
     /// Multi-signature configuration.
     MultiSigConfig,
     /// Proposal data keyed by proposal ID.
-    Proposal(u64),
+    AccessControlProposal(u64),
     /// Approval record: (proposal_id, approver) -> bool.
     ProposalApproval(u64, Address),
     /// Global proposal counter.
-    ProposalCounter,
+    AccessControlProposalCounter,
     /// List of all admin signers.
     AdminSigners,
     /// Role inheritance: role -> parent role Symbol.
@@ -301,14 +301,16 @@ fn indexer_role() -> Symbol {
 
 /// Fetch the current admin address.
 fn get_admin(env: &Env) -> Option<Address> {
-    env.storage().persistent().get(&AccessControlKey::Admin)
+    env.storage()
+        .persistent()
+        .get(&AccessControlKey::AccessControlAdmin)
 }
 
 /// Set the admin address (used only during initialization and transfer).
 fn set_admin(env: &Env, admin: &Address) {
     env.storage()
         .persistent()
-        .set(&AccessControlKey::Admin, admin);
+        .set(&AccessControlKey::AccessControlAdmin, admin);
 }
 
 /// Fetch a role membership record for (role, address).
@@ -778,11 +780,21 @@ pub fn transfer_admin(
 
     let admin_sym = admin_role();
 
-    // Revoke admin role from old admin
-    revoke_role(env, caller.clone(), admin_sym.clone(), old_admin.clone())?;
-
-    // Grant admin role to new admin (no expiry)
-    grant_role(env, caller.clone(), admin_sym, new_admin.clone(), None)?;
+    // Move the admin role directly through the storage helpers. Going through
+    // `revoke_role`/`grant_role` would call `caller.require_auth()` twice more
+    // in this same frame, which the host rejects (`Auth, ExistingValue`), so
+    // the transfer could never succeed on-chain.
+    delete_role_record(env, &admin_sym, &old_admin);
+    env.events().publish(
+        (symbol_short!("rbac"), symbol_short!("revoke")),
+        (admin_sym.clone(), old_admin.clone()),
+    );
+    register_known_role(env, &admin_sym);
+    set_role_record(env, &admin_sym, &new_admin, &RoleRecord::new(None));
+    env.events().publish(
+        (symbol_short!("rbac"), symbol_short!("grant")),
+        (admin_sym, new_admin.clone(), Option::<u32>::None),
+    );
 
     // Update the admin address
     set_admin(env, &new_admin);
@@ -993,9 +1005,10 @@ pub fn create_proposal(
         approval_count: 1, // Proposer auto-approves
     };
 
-    env.storage()
-        .persistent()
-        .set(&AccessControlKey::Proposal(proposal_id), &proposal);
+    env.storage().persistent().set(
+        &AccessControlKey::AccessControlProposal(proposal_id),
+        &proposal,
+    );
 
     // Record proposer's approval
     env.storage().persistent().set(
@@ -1055,7 +1068,7 @@ pub fn approve_proposal(
     let mut proposal: Proposal = env
         .storage()
         .persistent()
-        .get(&AccessControlKey::Proposal(proposal_id))
+        .get(&AccessControlKey::AccessControlProposal(proposal_id))
         .ok_or(AccessControlError::ProposalNotFound)?;
 
     if proposal.executed {
@@ -1084,9 +1097,10 @@ pub fn approve_proposal(
 
     proposal.approval_count += 1;
 
-    env.storage()
-        .persistent()
-        .set(&AccessControlKey::Proposal(proposal_id), &proposal);
+    env.storage().persistent().set(
+        &AccessControlKey::AccessControlProposal(proposal_id),
+        &proposal,
+    );
 
     env.events().publish(
         (symbol_short!("multisig"), symbol_short!("approve")),
@@ -1119,7 +1133,7 @@ pub fn execute_proposal(
     let mut proposal: Proposal = env
         .storage()
         .persistent()
-        .get(&AccessControlKey::Proposal(proposal_id))
+        .get(&AccessControlKey::AccessControlProposal(proposal_id))
         .ok_or(AccessControlError::ProposalNotFound)?;
 
     if proposal.executed {
@@ -1167,9 +1181,10 @@ pub fn execute_proposal(
     }
 
     proposal.executed = true;
-    env.storage()
-        .persistent()
-        .set(&AccessControlKey::Proposal(proposal_id), &proposal);
+    env.storage().persistent().set(
+        &AccessControlKey::AccessControlProposal(proposal_id),
+        &proposal,
+    );
 
     env.events().publish(
         (symbol_short!("multisig"), symbol_short!("execute")),
@@ -1183,7 +1198,7 @@ pub fn execute_proposal(
 pub fn get_proposal(env: &Env, proposal_id: u64) -> Result<Proposal, AccessControlError> {
     env.storage()
         .persistent()
-        .get(&AccessControlKey::Proposal(proposal_id))
+        .get(&AccessControlKey::AccessControlProposal(proposal_id))
         .ok_or(AccessControlError::ProposalNotFound)
 }
 
@@ -1200,12 +1215,12 @@ fn next_proposal_id(env: &Env) -> u64 {
     let current: u64 = env
         .storage()
         .instance()
-        .get(&AccessControlKey::ProposalCounter)
+        .get(&AccessControlKey::AccessControlProposalCounter)
         .unwrap_or(0);
     let next = current + 1;
     env.storage()
         .instance()
-        .set(&AccessControlKey::ProposalCounter, &next);
+        .set(&AccessControlKey::AccessControlProposalCounter, &next);
     next
 }
 

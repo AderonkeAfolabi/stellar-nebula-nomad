@@ -19,7 +19,7 @@ pub const MAX_MIGRATION_HISTORY: u32 = 50;
 #[contracttype]
 pub enum MigrationKey {
     /// Address allowed to run privileged migration operations.
-    Admin,
+    MigrationAdmin,
     /// Current schema version.
     CurrentSchemaVersion,
     /// Migration history entries.
@@ -135,7 +135,7 @@ pub struct DryRunReport {
 fn require_admin(env: &Env, admin: &Address) -> Result<(), MigrationError> {
     admin.require_auth();
 
-    let stored: Option<Address> = env.storage().instance().get(&MigrationKey::Admin);
+    let stored: Option<Address> = env.storage().instance().get(&MigrationKey::MigrationAdmin);
     match stored {
         Some(current) if current == *admin => Ok(()),
         _ => Err(MigrationError::Unauthorized),
@@ -158,7 +158,7 @@ pub fn initialize_migrations(
         .instance()
         .has(&MigrationKey::CurrentSchemaVersion)
     {
-        env.storage().instance().set(&MigrationKey::Admin, admin);
+        env.storage().instance().set(&MigrationKey::MigrationAdmin, admin);
         env.storage()
             .instance()
             .set(&MigrationKey::CurrentSchemaVersion, &initial_version);
