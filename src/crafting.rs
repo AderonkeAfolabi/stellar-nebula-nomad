@@ -178,7 +178,7 @@ fn craft_inner(
         (output_symbol, base_amount.saturating_add(bonus_output)),
     );
 
-    let xp_gain = 10 + (recipe.rarity * 5);
+    let xp_gain = recipe.rarity.saturating_mul(5).saturating_add(10);
     add_xp(env, player.clone(), xp_gain);
 
     // Recipe discovery: base 5% chance, boosted to 10% with a "keen eye"
@@ -262,7 +262,7 @@ pub fn get_total_craft_sink(env: &Env) -> u32 {
 
 pub fn add_xp(env: &Env, player: Address, xp: u32) {
     let current_xp = get_xp(env, player.clone());
-    let new_xp = current_xp + xp;
+    let new_xp = current_xp.saturating_add(xp);
 
     let old_level = get_level(env, player.clone());
     let new_level = 1 + (new_xp / 100);

@@ -22,6 +22,10 @@ use crate::resource_minter::{self, ResourceType};
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[repr(u32)]
 pub enum TournamentError {
+    /// Registration window is outside the allowed bounds (Issue #611).
+    InvalidRegistrationWindow = 17,
+    /// Player cannot cover the entry fee (Issue #611).
+    InsufficientFunds = 18,
     /// Caller exceeded the rate limit for this operation (Issue #610).
     RateLimitExceeded = 16,
     /// `max_players` must be a power of two in [4, 64].
@@ -118,6 +122,9 @@ pub struct BracketMatch {
 
 pub const MIN_TOURNAMENT_PLAYERS: u32 = 4;
 pub const MAX_TOURNAMENT_PLAYERS: u32 = 64;
+/// Shortest and longest accepted registration window.
+pub const MIN_REGISTRATION_WINDOW_SECS: u64 = 60;
+pub const MAX_REGISTRATION_WINDOW_SECS: u64 = 30 * 24 * 60 * 60;
 
 fn is_power_of_two(n: u32) -> bool {
     n != 0 && (n & (n - 1)) == 0
@@ -165,15 +172,16 @@ pub fn create_tournament(
         return Err(TournamentError::InvalidPlayerCount);
     }
 
-    let mut bps_sum: u32 = 0;
-    for i in 0..prize_distribution_bps.len() {
-        bps_sum = bps_sum
-            .checked_add(prize_distribution_bps.get(i).unwrap_or(0))
-            .ok_or(TournamentError::InvalidPrizeDistribution)?;
-    }
-    if bps_sum > 10_000 || prize_distribution_bps.len() > max_players {
-        return Err(TournamentError::InvalidPrizeDistribution);
-    }
+    crate::input_validation::check_bps_distribution(&prize_distribution_bps, max_players)
+        .map_err(|_| TournamentError::InvalidPrizeDistribution)?;
+    let now = env.ledger().timestamp();
+    let registration_deadline = crate::input_validation::checked_deadline(
+        now,
+        registration_window_secs,
+        MIN_REGISTRATION_WINDOW_SECS,
+        MAX_REGISTRATION_WINDOW_SECS,
+    )
+    .map_err(|_| TournamentError::InvalidRegistrationWindow)?;
 
     let counter: u64 = env
         .storage()
@@ -185,7 +193,6 @@ pub fn create_tournament(
         .persistent()
         .set(&TournamentDataKey::TournamentCounter, &tournament_id);
 
-    let now = env.ledger().timestamp();
     let tournament = Tournament {
         tournament_id,
         organizer: organizer.clone(),
@@ -194,7 +201,7 @@ pub fn create_tournament(
         max_players,
         status: symbol_short!("reg"),
         created_at: now,
-        registration_deadline: now + registration_window_secs,
+        registration_deadline,
         current_round: 0,
         total_rounds: 0,
         prize_pool: 0,
@@ -276,7 +283,7 @@ pub fn register_for_tournament(
             &tournament.resource_type,
             tournament.entry_fee,
         )
-        .map_err(|_| TournamentError::RegistrationClosed)?;
+        .map_err(|_| TournamentError::InsufficientFunds)?;
         tournament.prize_pool = tournament.prize_pool.saturating_add(tournament.entry_fee);
     }
 

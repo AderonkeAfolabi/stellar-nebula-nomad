@@ -183,7 +183,8 @@ mod ai_mission_engine;
 mod composability_examples;
 /// Cooperative guild quest tracking and reward distribution.
 pub mod guild_quests;
-mod input_validation;
+pub mod input_validation;
+mod validation_macros;
 mod nomad_bonding;
 mod player_housing;
 mod quest_system;

@@ -428,3 +428,7 @@ path = "tests/security/storage_key_collisions.rs"
 [[test]]
 name = "security_rate_limiting"
 path = "tests/security/rate_limiting_tests.rs"
+
+[[test]]
+name = "security_input_validation"
+path = "tests/security/input_validation_tests.rs"

@@ -204,6 +204,17 @@ pub const MAX_HP: u32 = 100;
 pub const MAX_ENERGY: u32 = 100;
 pub const COMBAT_TIMEOUT: u64 = 3600; // 1 hour
 pub const CHALLENGE_EXPIRY: u64 = 86400; // 24 hours
+/// Largest `power` a single combat move may carry (equal to a full health bar).
+pub const MAX_MOVE_POWER: u32 = MAX_HP;
+/// Largest stake accepted on a challenge or matchmaking entry. Keeps stake
+/// arithmetic (pots, fees) far from `i128` overflow.
+pub const MAX_STAKE: i128 = 1_000_000_000_000_000_000;
+
+/// Stake must be non-negative and bounded.
+fn validate_stake(stake: i128) -> Result<(), PvPError> {
+    crate::input_validation::check_range(stake, 0, MAX_STAKE)
+        .map_err(|_| PvPError::InvalidCombatParams)
+}
 pub const MAX_SPECTATORS: u32 = 50;
 pub const MAX_QUEUE_SIZE: u32 = 100;
 
@@ -463,6 +474,10 @@ pub fn create_challenge(
     challenger.require_auth();
     crate::rate_limiter::check_rate_limit(env, challenger, crate::rate_limiter::Operation::CombatInitiation)?;
 
+    crate::input_validation::check_distinct_addresses(challenger, opponent)
+        .map_err(|_| PvPError::InvalidCombatParams)?;
+    validate_stake(stake)?;
+
     // Check if opponent exists (has stats)
     let _ = get_or_init_stats(env, opponent);
 
@@ -645,6 +660,12 @@ pub fn execute_move(
     power: u32,
 ) -> Result<(), PvPError> {
     player.require_auth();
+
+    // Bound the move power: an unbounded value lets one move exceed a full
+    // health bar and makes the energy/damage arithmetic overflow-prone.
+    if power == 0 || power > MAX_MOVE_POWER {
+        return Err(PvPError::InvalidMove);
+    }
 
     let key = PvPDataKey::Combat(combat_id);
     let mut combat: CombatState = env
@@ -890,6 +911,8 @@ pub fn join_matchmaking(
 ) -> Result<(), PvPError> {
     player.require_auth();
     crate::rate_limiter::check_rate_limit(env, player, crate::rate_limiter::Operation::CombatInitiation)?;
+
+    validate_stake(preferred_stake)?;
 
     // Track last active
     update_last_active(env, player);

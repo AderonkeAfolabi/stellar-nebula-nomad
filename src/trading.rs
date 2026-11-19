@@ -14,6 +14,9 @@ use crate::reentrancy_guard::{with_guard, ReentrancyError};
 
 /// Maximum open orders per trader.
 pub const MAX_ORDERS_PER_TRADER: u32 = 50;
+/// Upper bound for a limit order's price and quantity. Keeps `price * quantity`
+/// (<= 1e36) inside `i128` for every downstream consumer.
+pub const MAX_ORDER_VALUE: i128 = 1_000_000_000_000_000_000;
 /// Maximum records kept in the global trading history ring buffer.
 pub const MAX_HISTORY: u32 = 50;
 
@@ -165,10 +168,10 @@ fn place_limit_order_unguarded(
     anti_whale::check_operation(env, trader, anti_whale::OpKind::Trade, 1)
         .map_err(|_| TradingError::DailyTradeCapExceeded)?;
 
-    if order.limit_price <= 0 {
+    if order.limit_price <= 0 || order.limit_price > MAX_ORDER_VALUE {
         return Err(TradingError::InvalidPrice);
     }
-    if order.quantity <= 0 {
+    if order.quantity <= 0 || order.quantity > MAX_ORDER_VALUE {
         return Err(TradingError::InvalidQuantity);
     }
 
@@ -512,10 +515,17 @@ fn constant_product(reserve_a: i128, reserve_b: i128) -> i128 {
 
 /// Calculate output amount for a given input using constant product AMM.
 /// amount_in * reserve_out / (reserve_in + amount_in)
-fn get_output_amount(amount_in: i128, reserve_in: i128, reserve_out: i128, fee_bps: u32) -> i128 {
-    let fee = amount_in * (fee_bps as i128) / 10000;
-    let amount_in_after_fee = amount_in - fee;
-    amount_in_after_fee * reserve_out / (reserve_in + amount_in_after_fee)
+fn get_output_amount(
+    amount_in: i128,
+    reserve_in: i128,
+    reserve_out: i128,
+    fee_bps: u32,
+) -> Option<i128> {
+    let fee = amount_in.checked_mul(i128::from(fee_bps))? / 10000;
+    let amount_in_after_fee = amount_in.checked_sub(fee)?;
+    let numerator = amount_in_after_fee.checked_mul(reserve_out)?;
+    let denominator = reserve_in.checked_add(amount_in_after_fee)?;
+    numerator.checked_div(denominator)
 }
 
 /// Calculate the LP token share for a liquidity deposit.
@@ -525,7 +535,7 @@ fn calculate_lp_mint(
     reserve_a: i128,
     reserve_b: i128,
     total_supply: i128,
-) -> i128 {
+) -> Option<i128> {
     if total_supply == 0 {
         // First deposit: geometric mean
         let sqrt = |x: i128| -> i128 {
@@ -537,15 +547,11 @@ fn calculate_lp_mint(
             }
             r
         };
-        sqrt(amount_a * amount_b)
+        Some(sqrt(amount_a.checked_mul(amount_b)?))
     } else {
-        let share_a = amount_a * total_supply / reserve_a;
-        let share_b = amount_b * total_supply / reserve_b;
-        if share_a < share_b {
-            share_a
-        } else {
-            share_b
-        }
+        let share_a = amount_a.checked_mul(total_supply)?.checked_div(reserve_a)?;
+        let share_b = amount_b.checked_mul(total_supply)?.checked_div(reserve_b)?;
+        Some(share_a.min(share_b))
     }
 }
 
@@ -666,7 +672,8 @@ fn add_liquidity_unguarded(
         pool.reserve_a,
         pool.reserve_b,
         pool.lp_total_supply,
-    );
+    )
+    .ok_or(AmmError::InvalidAmount)?;
 
     if lp_mint <= 0 {
         return Err(AmmError::ZeroLiquidity);
@@ -693,7 +700,12 @@ fn add_liquidity_unguarded(
     let current_balance: i128 = env.storage().persistent().get(&lp_key).unwrap_or(0);
     env.storage()
         .persistent()
-        .set(&lp_key, &(current_balance + lp_mint));
+        .set(
+            &lp_key,
+            &current_balance
+                .checked_add(lp_mint)
+                .ok_or(AmmError::InvalidAmount)?,
+        );
 
     // Update total supply key
     env.storage()
@@ -759,8 +771,14 @@ fn remove_liquidity_unguarded(
     }
 
     // Calculate share of reserves
-    let share_a = lp_amount * pool.reserve_a / pool.lp_total_supply;
-    let share_b = lp_amount * pool.reserve_b / pool.lp_total_supply;
+    let share_a = lp_amount
+        .checked_mul(pool.reserve_a)
+        .ok_or(AmmError::InvalidAmount)?
+        / pool.lp_total_supply;
+    let share_b = lp_amount
+        .checked_mul(pool.reserve_b)
+        .ok_or(AmmError::InvalidAmount)?
+        / pool.lp_total_supply;
 
     // Update reserves
     pool.reserve_a = pool
@@ -848,7 +866,9 @@ pub fn swap_exact_input(
                 return Err(AmmError::InsufficientLiquidity);
             }
 
-            let output = get_output_amount(current_amount, reserve_in, reserve_out, pool.fee_bps);
+            let output =
+                get_output_amount(current_amount, reserve_in, reserve_out, pool.fee_bps)
+                    .ok_or(AmmError::InvalidAmount)?;
             if output <= 0 {
                 return Err(AmmError::InsufficientLiquidity);
             }
@@ -988,12 +1008,8 @@ pub fn quote_swap(
         return Err(AmmError::InsufficientLiquidity);
     }
 
-    Ok(get_output_amount(
-        amount_in,
-        reserve_in,
-        reserve_out,
-        pool.fee_bps,
-    ))
+    get_output_amount(amount_in, reserve_in, reserve_out, pool.fee_bps)
+        .ok_or(AmmError::InvalidAmount)
 }
 
 // ── Tests (Issue #238: reentrancy safety) ───────────────────────────────────
