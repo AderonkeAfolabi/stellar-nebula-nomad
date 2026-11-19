@@ -196,6 +196,8 @@ pub use reputation::{
     BehaviorRecord, BehaviorType, DisputeReport, ReportStatus, ReputationError, ReputationScore,
 };
 
+/// RBAC error type returned by the `init_rbac` / `grant_role` / `check_permission`
+/// family of contract entry points (Issue #586).
 pub use access_control::AccessControlError;
 pub use analytics::{AnalyticsError, GlobalStats};
 pub use blueprint_factory::{Blueprint, BlueprintError, BlueprintRarity};
