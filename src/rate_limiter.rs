@@ -110,7 +110,7 @@ pub enum RateLimitKey {
     /// Tracks (call_count, window_start) per address + operation.
     Entry(Address, Operation),
     /// Admin-configurable limits per operation.
-    Config(Operation),
+    RateLimitConfigKey(Operation),
 }
 
 // ── Error ─────────────────────────────────────────────────────
@@ -164,7 +164,7 @@ pub fn check_rate_limit(env: &Env, caller: &Address, op: Operation) -> Result<()
     let config: RateLimitConfig = env
         .storage()
         .instance()
-        .get(&RateLimitKey::Config(op.clone()))
+        .get(&RateLimitKey::RateLimitConfigKey(op.clone()))
         .unwrap_or_else(|| match op {
             Operation::NebulaGeneration => RateLimitConfig::default_nebula_generation(),
             Operation::ResourceMinting => RateLimitConfig::default_resource_minting(),
@@ -231,7 +231,7 @@ pub fn set_rate_limit_config(
     }
     env.storage()
         .instance()
-        .set(&RateLimitKey::Config(op), &config);
+        .set(&RateLimitKey::RateLimitConfigKey(op), &config);
     Ok(())
 }
 

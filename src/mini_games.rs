@@ -106,7 +106,7 @@ pub enum MiniGameKey {
     MiniGamePlayerStats(Address),
     DailyChallenge(u64),
     ActiveChallenge,
-    Leaderboard(MiniGameType, u64),
+    MiniGameLeaderboard(MiniGameType, u64),
     DailyPlays(Address),
     GameConfig(MiniGameType),
     PlayerGames(Address, u64),
@@ -437,7 +437,7 @@ pub fn claim_daily_challenge(
 }
 
 fn update_leaderboard(env: &Env, player: Address, game_type: MiniGameType, score: u32) {
-    let leaderboard_key = MiniGameKey::Leaderboard(game_type.clone(), 0);
+    let leaderboard_key = MiniGameKey::MiniGameLeaderboard(game_type.clone(), 0);
     let entries: Vec<LeaderboardEntry> = env.storage().persistent()
         .get(&leaderboard_key).unwrap_or_else(|| Vec::new(env));
 
@@ -471,7 +471,7 @@ fn update_leaderboard(env: &Env, player: Address, game_type: MiniGameType, score
 
 pub fn get_leaderboard(env: &Env, game_type: MiniGameType) -> Vec<LeaderboardEntry> {
     env.storage().persistent()
-        .get(&MiniGameKey::Leaderboard(game_type, 0))
+        .get(&MiniGameKey::MiniGameLeaderboard(game_type, 0))
         .unwrap_or_else(|| Vec::new(env))
 }
 

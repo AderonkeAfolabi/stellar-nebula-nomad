@@ -39,7 +39,7 @@ pub enum RealtimeKey {
     /// Admin address.
     RealtimeAdmin,
     /// Event leaderboard: event_id -> Vec<EventLeaderboardEntry>.
-    Leaderboard(u64),
+    RealtimeLeaderboard(u64),
 }
 
 // ─── Data Types ───────────────────────────────────────────────────────────────
