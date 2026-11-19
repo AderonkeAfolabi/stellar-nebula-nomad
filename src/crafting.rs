@@ -9,6 +9,8 @@ use soroban_sdk::{contracterror, symbol_short, Address, Env, Symbol, Vec};
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[repr(u32)]
 pub enum CraftingError {
+    /// Caller exceeded the rate limit for this operation (Issue #610).
+    RateLimitExceeded = 10,
     RecipeLocked = 1,
     InsufficientLevel = 2,
     InsufficientResources = 3,
@@ -35,6 +37,7 @@ impl crate::error_standard::StandardContractError for CraftingError {
             Self::InsufficientLevel
             | Self::InsufficientResources
             | Self::InsufficientSkillPoints => (ErrorKind::ResourceLimit, false),
+            Self::RateLimitExceeded => (ErrorKind::ResourceLimit, true),
             Self::RecipeNotFound | Self::NodeNotFound => (ErrorKind::NotFound, false),
             Self::WrongSpecialization => (ErrorKind::Validation, false),
         };
@@ -106,6 +109,7 @@ use crate::ensure_auth;
 /// output is minted.
 pub fn craft(env: Env, player: Address, recipe_id: u32) -> Result<(), CraftingError> {
     ensure_auth!(player);
+    crate::rate_limiter::check_rate_limit(&env, &player, crate::rate_limiter::Operation::Crafting)?;
     craft_inner(&env, &player, recipe_id, false)
 }
 
@@ -122,6 +126,7 @@ pub fn craft_with_overcharge(
     recipe_id: u32,
 ) -> Result<(), CraftingError> {
     ensure_auth!(player);
+    crate::rate_limiter::check_rate_limit(&env, &player, crate::rate_limiter::Operation::Crafting)?;
     craft_inner(&env, &player, recipe_id, true)
 }
 
@@ -173,7 +178,7 @@ fn craft_inner(
         (output_symbol, base_amount.saturating_add(bonus_output)),
     );
 
-    let xp_gain = 10 + (recipe.rarity * 5);
+    let xp_gain = recipe.rarity.saturating_mul(5).saturating_add(10);
     add_xp(env, player.clone(), xp_gain);
 
     // Recipe discovery: base 5% chance, boosted to 10% with a "keen eye"
@@ -257,7 +262,7 @@ pub fn get_total_craft_sink(env: &Env) -> u32 {
 
 pub fn add_xp(env: &Env, player: Address, xp: u32) {
     let current_xp = get_xp(env, player.clone());
-    let new_xp = current_xp + xp;
+    let new_xp = current_xp.saturating_add(xp);
 
     let old_level = get_level(env, player.clone());
     let new_level = 1 + (new_xp / 100);
@@ -451,6 +456,12 @@ fn set_resource_balance(env: &Env, player: &Address, symbol: Symbol, amount: u32
     env.storage().instance().set(&key, &amount);
 }
 
+impl From<crate::rate_limiter::RateLimitError> for CraftingError {
+    fn from(_: crate::rate_limiter::RateLimitError) -> Self {
+        CraftingError::RateLimitExceeded
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -487,7 +498,7 @@ mod tests {
         }
     }
 
-    // // #[test]
+    #[test]
     fn test_craft_common_recipe_succeeds() {
         let (env, id) = make_env();
         let player = Address::generate(&env);
@@ -509,7 +520,7 @@ mod tests {
         });
     }
 
-    // // #[test]
+    #[test]
     fn test_craft_locked_rare_returns_error() {
         let (env, id) = make_env();
         let player = Address::generate(&env);
@@ -528,7 +539,7 @@ mod tests {
         });
     }
 
-    // // #[test]
+    #[test]
     fn test_craft_after_unlock_succeeds() {
         let (env, id) = make_env();
         let player = Address::generate(&env);
@@ -552,7 +563,7 @@ mod tests {
         });
     }
 
-    // // #[test]
+    #[test]
     fn test_craft_insufficient_resources_returns_error() {
         let (env, id) = make_env();
         let player = Address::generate(&env);
@@ -569,7 +580,7 @@ mod tests {
         });
     }
 
-    // // #[test]
+    #[test]
     fn test_craft_recipe_not_found_returns_error() {
         let (env, id) = make_env();
         let player = Address::generate(&env);
@@ -583,7 +594,7 @@ mod tests {
 
     // ── Skill Trees (Issue #266) ────────────────────────────────────────────
 
-    // // #[test]
+    // #[test] // needs one as_contract frame per authorized call
     fn test_choose_specialization_once_only() {
         let (env, id) = make_env();
         let player = Address::generate(&env);
@@ -601,7 +612,7 @@ mod tests {
         });
     }
 
-    // // #[test]
+    // #[test] // needs one as_contract frame per authorized call
     fn test_craft_gated_by_specialization() {
         let (env, id) = make_env();
         let player = Address::generate(&env);
@@ -627,7 +638,7 @@ mod tests {
         });
     }
 
-    // // #[test]
+    // #[test] // needs one as_contract frame per authorized call
     fn test_craft_succeeds_with_matching_specialization() {
         let (env, id) = make_env();
         let player = Address::generate(&env);
@@ -647,7 +658,7 @@ mod tests {
         });
     }
 
-    // // #[test]
+    // #[test] // needs one as_contract frame per authorized call
     fn test_unlock_skill_node_flow() {
         let (env, id) = make_env();
         let player = Address::generate(&env);
@@ -683,7 +694,7 @@ mod tests {
         });
     }
 
-    // // #[test]
+    // #[test] // needs one as_contract frame per authorized call
     fn test_discovery_boost_active_with_keen_eye_node() {
         let (env, id) = make_env();
         let player = Address::generate(&env);
@@ -700,7 +711,7 @@ mod tests {
         });
     }
 
-    // // #[test]
+    // #[test] // needs one as_contract frame per authorized call
     fn test_mastery_bonus_grants_extra_output_after_interval() {
         let (env, id) = make_env();
         let player = Address::generate(&env);
@@ -743,7 +754,7 @@ mod tests {
         (env, id, player, iron, steel)
     }
 
-    // // #[test]
+    #[test]
     fn total_craft_sink_starts_at_zero() {
         let (env, id) = make_env();
         env.as_contract(&id, || {
@@ -751,7 +762,7 @@ mod tests {
         });
     }
 
-    // // #[test]
+    #[test]
     fn craft_consumes_inputs_and_records_sink_volume() {
         let (env, id, player, _iron, _steel) = setup_sink_scenario(10);
         env.as_contract(&id, || {
@@ -769,7 +780,7 @@ mod tests {
         });
     }
 
-    // // #[test]
+    #[test]
     fn craft_sink_volume_accumulates_across_crafts() {
         let (env, id, player, _iron, _steel) = setup_sink_scenario(20);
         // One auth per frame, so one craft per contract scope.
@@ -787,7 +798,7 @@ mod tests {
         });
     }
 
-    // // #[test]
+    #[test]
     fn overcharge_burns_extra_primary_input() {
         // 5 for the recipe + 5 surcharge at +100%.
         let (env, id, player, _iron, _steel) = setup_sink_scenario(10);
@@ -806,7 +817,7 @@ mod tests {
         });
     }
 
-    // // #[test]
+    #[test]
     fn overcharge_rejected_when_cannot_afford_surcharge() {
         // Exactly enough for the recipe, but not for the premium.
         let (env, id, player, _iron, _steel) = setup_sink_scenario(5);
@@ -826,7 +837,7 @@ mod tests {
         });
     }
 
-    // // #[test]
+    #[test]
     fn overcharge_guarantees_rare_discovery() {
         let (env, id, player, _iron, _steel) = setup_sink_scenario(10);
         env.as_contract(&id, || {
@@ -837,7 +848,7 @@ mod tests {
         });
     }
 
-    // // #[test]
+    #[test]
     fn unknown_recipe_does_not_sink_resources() {
         let (env, id, player, _iron, _steel) = setup_sink_scenario(10);
         env.as_contract(&id, || {
@@ -853,7 +864,7 @@ mod tests {
         });
     }
 
-    // // #[test]
+    #[test]
     fn insufficient_resources_does_not_sink() {
         let (env, id, player, _iron, _steel) = setup_sink_scenario(4);
         env.as_contract(&id, || {
