@@ -1204,7 +1204,10 @@ mod tests {
         let challenger = Address::generate(&env);
         let opponent = Address::generate(&env);
 
-        let challenge_id = at(&env, &contract, || create_challenge(&env, &challenger, &opponent, 100)).unwrap();
+        let challenge_id = at(&env, &contract, || {
+            create_challenge(&env, &challenger, &opponent, 100)
+        })
+        .unwrap();
         assert!(challenge_id > 0);
 
         let challenge = at(&env, &contract, || get_challenge(&env, challenge_id)).unwrap();
@@ -1217,8 +1220,14 @@ mod tests {
         let challenger = Address::generate(&env);
         let opponent = Address::generate(&env);
 
-        let challenge_id = at(&env, &contract, || create_challenge(&env, &challenger, &opponent, 100)).unwrap();
-        let combat_id = at(&env, &contract, || accept_challenge(&env, &opponent, challenge_id)).unwrap();
+        let challenge_id = at(&env, &contract, || {
+            create_challenge(&env, &challenger, &opponent, 100)
+        })
+        .unwrap();
+        let combat_id = at(&env, &contract, || {
+            accept_challenge(&env, &opponent, challenge_id)
+        })
+        .unwrap();
 
         let combat = at(&env, &contract, || get_combat(&env, combat_id)).unwrap();
         assert_eq!(combat.status, symbol_short!("active"));
@@ -1230,19 +1239,27 @@ mod tests {
         let challenger = Address::generate(&env);
         let opponent = Address::generate(&env);
 
-        let challenge_id = at(&env, &contract, || create_challenge(&env, &challenger, &opponent, 100)).unwrap();
-        let combat_id = at(&env, &contract, || accept_challenge(&env, &opponent, challenge_id)).unwrap();
+        let challenge_id = at(&env, &contract, || {
+            create_challenge(&env, &challenger, &opponent, 100)
+        })
+        .unwrap();
+        let combat_id = at(&env, &contract, || {
+            accept_challenge(&env, &opponent, challenge_id)
+        })
+        .unwrap();
 
         let combat = at(&env, &contract, || get_combat(&env, combat_id)).unwrap();
         let first_player = combat.turn.clone();
 
-        at(&env, &contract, || execute_move(
-            &env,
-            &first_player,
-            combat_id,
-            Symbol::new(&env, "attack"),
-            10,
-        ))
+        at(&env, &contract, || {
+            execute_move(
+                &env,
+                &first_player,
+                combat_id,
+                Symbol::new(&env, "attack"),
+                10,
+            )
+        })
         .unwrap();
 
         let updated = at(&env, &contract, || get_combat(&env, combat_id)).unwrap();
@@ -1278,16 +1295,18 @@ mod tests {
         let result = at(&env, &contract, || set_admin(&env, &attacker));
         assert_eq!(result, Err(PvPError::AlreadyInitialized));
 
-        let result = at(&env, &contract, || set_rewards_config(
-            &env,
-            &attacker,
-            RewardsConfig {
-                base_reward: 999,
-                win_bonus: 999,
-                elo_bonus_multiplier: 1,
-                streak_bonus: 0,
-            },
-        ));
+        let result = at(&env, &contract, || {
+            set_rewards_config(
+                &env,
+                &attacker,
+                RewardsConfig {
+                    base_reward: 999,
+                    win_bonus: 999,
+                    elo_bonus_multiplier: 1,
+                    streak_bonus: 0,
+                },
+            )
+        });
         assert_eq!(result, Err(PvPError::Unauthorized));
     }
 }

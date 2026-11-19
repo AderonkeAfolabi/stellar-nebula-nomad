@@ -116,9 +116,9 @@ pub enum WeatherKey {
 pub struct WeatherState {
     pub region_id: u64,
     pub weather: WeatherType,
-    pub intensity: u32,       // 1-100
-    pub started_at: u64,      // ledger timestamp
-    pub ends_at: u64,         // ledger timestamp
+    pub intensity: u32,  // 1-100
+    pub started_at: u64, // ledger timestamp
+    pub ends_at: u64,    // ledger timestamp
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -127,7 +127,7 @@ pub struct WeatherForecast {
     pub weather: WeatherType,
     pub intensity: u32,
     pub starts_at: u64,
-    pub confidence: u32,      // 0-100, 80% target accuracy
+    pub confidence: u32, // 0-100, 80% target accuracy
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -158,7 +158,9 @@ pub enum WeatherError {
 /// and seasonal trends.
 pub fn generate_weather(env: &Env, region_id: u64) -> WeatherState {
     let timestamp = env.ledger().timestamp();
-    let seed = timestamp.wrapping_mul(region_id).wrapping_add(env.ledger().sequence() as u64);
+    let seed = timestamp
+        .wrapping_mul(region_id)
+        .wrapping_add(env.ledger().sequence() as u64);
 
     let weather_type = match seed % 11 {
         0 => WeatherType::IonStorm,
@@ -185,7 +187,9 @@ pub fn generate_weather(env: &Env, region_id: u64) -> WeatherState {
         ends_at: timestamp + duration_hours * 3600,
     };
 
-    env.storage().persistent().set(&WeatherKey::Current(region_id), &state);
+    env.storage()
+        .persistent()
+        .set(&WeatherKey::Current(region_id), &state);
     state
 }
 
@@ -244,7 +248,9 @@ pub fn generate_forecast(env: &Env, region_id: u64) -> Vec<WeatherForecast> {
         });
     }
 
-    env.storage().persistent().set(&WeatherKey::Forecast(region_id), &forecasts);
+    env.storage()
+        .persistent()
+        .set(&WeatherKey::Forecast(region_id), &forecasts);
     forecasts
 }
 

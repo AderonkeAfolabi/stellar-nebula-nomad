@@ -1490,7 +1490,11 @@ mod tests {
         let (env, admin) = setup_env();
         in_contract(&env, || init_roles(&env, admin)).unwrap();
         let player = Address::generate(&env);
-        assert!(!in_contract(&env, || has_role(&env, &nomad_role(), &player)));
+        assert!(!in_contract(&env, || has_role(
+            &env,
+            &nomad_role(),
+            &player
+        )));
     }
 
     #[test]
@@ -1498,7 +1502,10 @@ mod tests {
         let (env, admin) = setup_env();
         in_contract(&env, || init_roles(&env, admin.clone())).unwrap();
         let player = Address::generate(&env);
-        in_contract(&env, || grant_role(&env, admin, nomad_role(), player.clone(), None)).unwrap();
+        in_contract(&env, || {
+            grant_role(&env, admin, nomad_role(), player.clone(), None)
+        })
+        .unwrap();
         assert!(in_contract(&env, || has_role(&env, &nomad_role(), &player)));
     }
 
@@ -1507,10 +1514,20 @@ mod tests {
         let (env, admin) = setup_env();
         in_contract(&env, || init_roles(&env, admin.clone())).unwrap();
         let player = Address::generate(&env);
-        in_contract(&env, || grant_role(&env, admin.clone(), nomad_role(), player.clone(), None)).unwrap();
+        in_contract(&env, || {
+            grant_role(&env, admin.clone(), nomad_role(), player.clone(), None)
+        })
+        .unwrap();
         assert!(in_contract(&env, || has_role(&env, &nomad_role(), &player)));
-        in_contract(&env, || revoke_role(&env, admin, nomad_role(), player.clone())).unwrap();
-        assert!(!in_contract(&env, || has_role(&env, &nomad_role(), &player)));
+        in_contract(&env, || {
+            revoke_role(&env, admin, nomad_role(), player.clone())
+        })
+        .unwrap();
+        assert!(!in_contract(&env, || has_role(
+            &env,
+            &nomad_role(),
+            &player
+        )));
     }
 
     #[test]
@@ -1519,10 +1536,17 @@ mod tests {
         in_contract(&env, || init_roles(&env, admin.clone())).unwrap();
         let player = Address::generate(&env);
         let expiry = env.ledger().sequence() + 10;
-        in_contract(&env, || grant_role(&env, admin, nomad_role(), player.clone(), Some(expiry))).unwrap();
+        in_contract(&env, || {
+            grant_role(&env, admin, nomad_role(), player.clone(), Some(expiry))
+        })
+        .unwrap();
         assert!(in_contract(&env, || has_role(&env, &nomad_role(), &player)));
         advance_ledger(&env, 10);
-        assert!(!in_contract(&env, || has_role(&env, &nomad_role(), &player)));
+        assert!(!in_contract(&env, || has_role(
+            &env,
+            &nomad_role(),
+            &player
+        )));
     }
 
     #[test]
@@ -1531,7 +1555,10 @@ mod tests {
         in_contract(&env, || init_roles(&env, admin.clone())).unwrap();
         let player = Address::generate(&env);
         let expiry = env.ledger().sequence() + 50;
-        in_contract(&env, || grant_role(&env, admin, nomad_role(), player.clone(), Some(expiry))).unwrap();
+        in_contract(&env, || {
+            grant_role(&env, admin, nomad_role(), player.clone(), Some(expiry))
+        })
+        .unwrap();
         advance_ledger(&env, 10);
         assert!(in_contract(&env, || has_role(&env, &nomad_role(), &player)));
     }
@@ -1541,7 +1568,10 @@ mod tests {
         let (env, admin) = setup_env();
         in_contract(&env, || init_roles(&env, admin.clone())).unwrap();
         let player = Address::generate(&env);
-        in_contract(&env, || grant_role(&env, admin, nomad_role(), player.clone(), None)).unwrap();
+        in_contract(&env, || {
+            grant_role(&env, admin, nomad_role(), player.clone(), None)
+        })
+        .unwrap();
         advance_ledger(&env, 1000);
         assert!(in_contract(&env, || has_role(&env, &nomad_role(), &player)));
     }
@@ -1552,15 +1582,26 @@ mod tests {
     fn test_has_permission_returns_false_for_undefined_permission() {
         let (env, admin) = setup_env();
         in_contract(&env, || init_roles(&env, admin)).unwrap();
-        assert!(!in_contract(&env, || has_permission(&env, &nomad_role(), &symbol_short!("scan"))));
+        assert!(!in_contract(&env, || has_permission(
+            &env,
+            &nomad_role(),
+            &symbol_short!("scan")
+        )));
     }
 
     #[test]
     fn test_has_permission_returns_true_after_grant() {
         let (env, admin) = setup_env();
         in_contract(&env, || init_roles(&env, admin.clone())).unwrap();
-        in_contract(&env, || grant_permission(&env, admin, nomad_role(), symbol_short!("scan"))).unwrap();
-        assert!(in_contract(&env, || has_permission(&env, &nomad_role(), &symbol_short!("scan"))));
+        in_contract(&env, || {
+            grant_permission(&env, admin, nomad_role(), symbol_short!("scan"))
+        })
+        .unwrap();
+        assert!(in_contract(&env, || has_permission(
+            &env,
+            &nomad_role(),
+            &symbol_short!("scan")
+        )));
     }
 
     #[test]
@@ -1568,10 +1609,24 @@ mod tests {
         let (env, admin) = setup_env();
         in_contract(&env, || init_roles(&env, admin.clone())).unwrap();
         let action = symbol_short!("scan");
-        in_contract(&env, || grant_permission(&env, admin.clone(), nomad_role(), action.clone())).unwrap();
-        assert!(in_contract(&env, || has_permission(&env, &nomad_role(), &action)));
-        in_contract(&env, || revoke_permission(&env, admin, nomad_role(), action.clone())).unwrap();
-        assert!(!in_contract(&env, || has_permission(&env, &nomad_role(), &action)));
+        in_contract(&env, || {
+            grant_permission(&env, admin.clone(), nomad_role(), action.clone())
+        })
+        .unwrap();
+        assert!(in_contract(&env, || has_permission(
+            &env,
+            &nomad_role(),
+            &action
+        )));
+        in_contract(&env, || {
+            revoke_permission(&env, admin, nomad_role(), action.clone())
+        })
+        .unwrap();
+        assert!(!in_contract(&env, || has_permission(
+            &env,
+            &nomad_role(),
+            &action
+        )));
     }
 
     // ── grant_role Tests ──
@@ -1581,7 +1636,9 @@ mod tests {
         let (env, admin) = setup_env();
         in_contract(&env, || init_roles(&env, admin.clone())).unwrap();
         let player = Address::generate(&env);
-        let result = in_contract(&env, || grant_role(&env, admin, nomad_role(), player.clone(), None));
+        let result = in_contract(&env, || {
+            grant_role(&env, admin, nomad_role(), player.clone(), None)
+        });
         assert!(result.is_ok());
         assert!(in_contract(&env, || has_role(&env, &nomad_role(), &player)));
     }
@@ -1592,9 +1649,15 @@ mod tests {
         in_contract(&env, || init_roles(&env, admin)).unwrap();
         let non_admin = Address::generate(&env);
         let player = Address::generate(&env);
-        let result = in_contract(&env, || grant_role(&env, non_admin, nomad_role(), player.clone(), None));
+        let result = in_contract(&env, || {
+            grant_role(&env, non_admin, nomad_role(), player.clone(), None)
+        });
         assert_eq!(result, Err(AccessControlError::AdminRequired));
-        assert!(!in_contract(&env, || has_role(&env, &nomad_role(), &player)));
+        assert!(!in_contract(&env, || has_role(
+            &env,
+            &nomad_role(),
+            &player
+        )));
     }
 
     #[test]
@@ -1603,7 +1666,9 @@ mod tests {
         in_contract(&env, || init_roles(&env, admin.clone())).unwrap();
         let player = Address::generate(&env);
         let past_expiry = env.ledger().sequence() - 1;
-        let result = in_contract(&env, || grant_role(&env, admin, nomad_role(), player, Some(past_expiry)));
+        let result = in_contract(&env, || {
+            grant_role(&env, admin, nomad_role(), player, Some(past_expiry))
+        });
         assert_eq!(result, Err(AccessControlError::InvalidExpiry));
     }
 
@@ -1613,7 +1678,9 @@ mod tests {
         in_contract(&env, || init_roles(&env, admin.clone())).unwrap();
         let player = Address::generate(&env);
         let current_seq = env.ledger().sequence();
-        let result = in_contract(&env, || grant_role(&env, admin, nomad_role(), player, Some(current_seq)));
+        let result = in_contract(&env, || {
+            grant_role(&env, admin, nomad_role(), player, Some(current_seq))
+        });
         assert_eq!(result, Err(AccessControlError::InvalidExpiry));
     }
 
@@ -1627,7 +1694,9 @@ mod tests {
         for _ in 0..5 {
             grantees.push_back(Address::generate(&env));
         }
-        let result = in_contract(&env, || grant_role_batch(&env, admin, nomad_role(), grantees.clone(), None));
+        let result = in_contract(&env, || {
+            grant_role_batch(&env, admin, nomad_role(), grantees.clone(), None)
+        });
         assert!(result.is_ok());
         for i in 0..grantees.len() {
             if let Some(g) = grantees.get(i) {
@@ -1644,7 +1713,9 @@ mod tests {
         for _ in 0..6 {
             grantees.push_back(Address::generate(&env));
         }
-        let _result = in_contract(&env, || grant_role_batch(&env, admin, nomad_role(), grantees.clone(), None));
+        let _result = in_contract(&env, || {
+            grant_role_batch(&env, admin, nomad_role(), grantees.clone(), None)
+        });
         // Note: Would fail due to AdminRequired, but the batch limit should be checked first
         // Let's test with correct admin
     }
@@ -1656,7 +1727,9 @@ mod tests {
         let non_admin = Address::generate(&env);
         let mut grantees = Vec::new(&env);
         grantees.push_back(Address::generate(&env));
-        let result = in_contract(&env, || grant_role_batch(&env, non_admin, nomad_role(), grantees, None));
+        let result = in_contract(&env, || {
+            grant_role_batch(&env, non_admin, nomad_role(), grantees, None)
+        });
         assert_eq!(result, Err(AccessControlError::AdminRequired));
     }
 
@@ -1669,8 +1742,14 @@ mod tests {
         let player = Address::generate(&env);
         let action = symbol_short!("scan");
 
-        in_contract(&env, || grant_role(&env, admin.clone(), nomad_role(), player.clone(), None)).unwrap();
-        in_contract(&env, || grant_permission(&env, admin, nomad_role(), action.clone())).unwrap();
+        in_contract(&env, || {
+            grant_role(&env, admin.clone(), nomad_role(), player.clone(), None)
+        })
+        .unwrap();
+        in_contract(&env, || {
+            grant_permission(&env, admin, nomad_role(), action.clone())
+        })
+        .unwrap();
 
         let result = in_contract(&env, || check_permission(&env, &player, &action));
         assert!(result.is_ok());
@@ -1683,7 +1762,10 @@ mod tests {
         let player = Address::generate(&env);
         let action = symbol_short!("scan");
 
-        in_contract(&env, || grant_permission(&env, admin, nomad_role(), action.clone())).unwrap();
+        in_contract(&env, || {
+            grant_permission(&env, admin, nomad_role(), action.clone())
+        })
+        .unwrap();
 
         let result = in_contract(&env, || check_permission(&env, &player, &action));
         assert_eq!(result, Err(AccessControlError::UnauthorizedRole));
@@ -1696,7 +1778,10 @@ mod tests {
         let player = Address::generate(&env);
         let action = symbol_short!("scan");
 
-        in_contract(&env, || grant_role(&env, admin, nomad_role(), player.clone(), None)).unwrap();
+        in_contract(&env, || {
+            grant_role(&env, admin, nomad_role(), player.clone(), None)
+        })
+        .unwrap();
         // Don't grant permission
 
         let result = in_contract(&env, || check_permission(&env, &player, &action));
@@ -1711,15 +1796,20 @@ mod tests {
         let action = symbol_short!("scan");
         let expiry = env.ledger().sequence() + 5;
 
-        in_contract(&env, || grant_role(
-            &env,
-            admin.clone(),
-            nomad_role(),
-            player.clone(),
-            Some(expiry),
-        ))
+        in_contract(&env, || {
+            grant_role(
+                &env,
+                admin.clone(),
+                nomad_role(),
+                player.clone(),
+                Some(expiry),
+            )
+        })
         .unwrap();
-        in_contract(&env, || grant_permission(&env, admin, nomad_role(), action.clone())).unwrap();
+        in_contract(&env, || {
+            grant_permission(&env, admin, nomad_role(), action.clone())
+        })
+        .unwrap();
 
         advance_ledger(&env, 5);
 
@@ -1734,11 +1824,20 @@ mod tests {
         let player = Address::generate(&env);
         let action = symbol_short!("scan");
 
-        in_contract(&env, || grant_role(&env, admin.clone(), nomad_role(), player.clone(), None)).unwrap();
-        in_contract(&env, || grant_permission(&env, admin.clone(), nomad_role(), action.clone())).unwrap();
+        in_contract(&env, || {
+            grant_role(&env, admin.clone(), nomad_role(), player.clone(), None)
+        })
+        .unwrap();
+        in_contract(&env, || {
+            grant_permission(&env, admin.clone(), nomad_role(), action.clone())
+        })
+        .unwrap();
         assert!(in_contract(&env, || check_permission(&env, &player, &action)).is_ok());
 
-        in_contract(&env, || revoke_role(&env, admin, nomad_role(), player.clone())).unwrap();
+        in_contract(&env, || {
+            revoke_role(&env, admin, nomad_role(), player.clone())
+        })
+        .unwrap();
 
         let result = in_contract(&env, || check_permission(&env, &player, &action));
         assert_eq!(result, Err(AccessControlError::UnauthorizedRole));
@@ -1752,11 +1851,20 @@ mod tests {
         in_contract(&env, || init_roles(&env, admin.clone())).unwrap();
         let new_admin = Address::generate(&env);
 
-        let result = in_contract(&env, || transfer_admin(&env, admin.clone(), new_admin.clone()));
+        let result = in_contract(&env, || {
+            transfer_admin(&env, admin.clone(), new_admin.clone())
+        });
         assert!(result.is_ok());
 
-        assert_eq!(in_contract(&env, || get_admin(&env)), Some(new_admin.clone()));
-        assert!(in_contract(&env, || has_role(&env, &admin_role(), &new_admin)));
+        assert_eq!(
+            in_contract(&env, || get_admin(&env)),
+            Some(new_admin.clone())
+        );
+        assert!(in_contract(&env, || has_role(
+            &env,
+            &admin_role(),
+            &new_admin
+        )));
         assert!(!in_contract(&env, || has_role(&env, &admin_role(), &admin)));
     }
 
@@ -1780,7 +1888,9 @@ mod tests {
 
         in_contract(&env, || transfer_admin(&env, admin, new_admin.clone())).unwrap();
 
-        let result = in_contract(&env, || grant_role(&env, new_admin, nomad_role(), player.clone(), None));
+        let result = in_contract(&env, || {
+            grant_role(&env, new_admin, nomad_role(), player.clone(), None)
+        });
         assert!(result.is_ok());
         assert!(in_contract(&env, || has_role(&env, &nomad_role(), &player)));
     }
@@ -1809,34 +1919,49 @@ mod tests {
         let captain_role = symbol_short!("captain");
         let pilot_address = Address::generate(&env);
 
-        in_contract(&env, || grant_permission(
-            &env,
-            admin.clone(),
-            officer_role.clone(),
-            symbol_short!("steer"),
-        ))
+        in_contract(&env, || {
+            grant_permission(
+                &env,
+                admin.clone(),
+                officer_role.clone(),
+                symbol_short!("steer"),
+            )
+        })
         .unwrap();
         // captain inherits from officer
-        in_contract(&env, || set_role_parent(
-            &env,
-            admin.clone(),
-            captain_role.clone(),
-            officer_role.clone(),
-        ))
+        in_contract(&env, || {
+            set_role_parent(
+                &env,
+                admin.clone(),
+                captain_role.clone(),
+                officer_role.clone(),
+            )
+        })
         .unwrap();
 
-        in_contract(&env, || grant_role(
-            &env,
-            admin.clone(),
-            captain_role.clone(),
-            pilot_address.clone(),
-            None,
-        ))
+        in_contract(&env, || {
+            grant_role(
+                &env,
+                admin.clone(),
+                captain_role.clone(),
+                pilot_address.clone(),
+                None,
+            )
+        })
         .unwrap();
 
         // pilot has captain role, which inherits "steer" from officer
-        assert!(in_contract(&env, || has_permission(&env, &captain_role, &symbol_short!("steer"))));
-        assert!(in_contract(&env, || check_permission(&env, &pilot_address, &symbol_short!("steer"))).is_ok());
+        assert!(in_contract(&env, || has_permission(
+            &env,
+            &captain_role,
+            &symbol_short!("steer")
+        )));
+        assert!(in_contract(&env, || check_permission(
+            &env,
+            &pilot_address,
+            &symbol_short!("steer")
+        ))
+        .is_ok());
     }
 
     #[test]
@@ -1858,18 +1983,25 @@ mod tests {
         let emergency_responder = Address::generate(&env);
         let responder_role = symbol_short!("responder");
 
-        in_contract(&env, || grant_role(
-            &env,
-            admin.clone(),
-            responder_role.clone(),
-            emergency_responder.clone(),
-            None,
-        ))
+        in_contract(&env, || {
+            grant_role(
+                &env,
+                admin.clone(),
+                responder_role.clone(),
+                emergency_responder.clone(),
+                None,
+            )
+        })
         .unwrap();
-        in_contract(&env, || set_emergency_role(&env, admin.clone(), responder_role.clone(), true)).unwrap();
+        in_contract(&env, || {
+            set_emergency_role(&env, admin.clone(), responder_role.clone(), true)
+        })
+        .unwrap();
 
         // Outside emergency mode, responder cannot execute unguarded actions
-        let res = in_contract(&env, || check_permission(&env, &emergency_responder, &symbol_short!("evacuate")));
+        let res = in_contract(&env, || {
+            check_permission(&env, &emergency_responder, &symbol_short!("evacuate"))
+        });
         assert!(res.is_err());
 
         // Enable emergency mode
@@ -1877,7 +2009,9 @@ mod tests {
         assert!(in_contract(&env, || is_emergency_mode(&env)));
 
         // Now emergency responder bypasses restriction
-        let res = in_contract(&env, || check_permission(&env, &emergency_responder, &symbol_short!("evacuate")));
+        let res = in_contract(&env, || {
+            check_permission(&env, &emergency_responder, &symbol_short!("evacuate"))
+        });
         assert!(res.is_ok());
     }
 
@@ -1892,16 +2026,21 @@ mod tests {
         let delegatee = Address::generate(&env);
         let role = nomad_role();
 
-        in_contract(&env, || grant_role(&env, admin, role.clone(), delegator.clone(), None)).unwrap();
+        in_contract(&env, || {
+            grant_role(&env, admin, role.clone(), delegator.clone(), None)
+        })
+        .unwrap();
 
         let expiry_seq = env.ledger().sequence() + 10;
-        in_contract(&env, || delegate_role(
-            &env,
-            delegator.clone(),
-            delegatee.clone(),
-            role.clone(),
-            expiry_seq,
-        ))
+        in_contract(&env, || {
+            delegate_role(
+                &env,
+                delegator.clone(),
+                delegatee.clone(),
+                role.clone(),
+                expiry_seq,
+            )
+        })
         .unwrap();
 
         assert!(in_contract(&env, || has_role(&env, &role, &delegatee)));
@@ -1920,8 +2059,16 @@ mod tests {
 
         let admin_r = admin_role();
         // admin inherits operator permissions ("operate", "pause") and readonly ("read", "query")
-        assert!(in_contract(&env, || has_permission(&env, &admin_r, &symbol_short!("operate"))));
-        assert!(in_contract(&env, || has_permission(&env, &admin_r, &symbol_short!("read"))));
+        assert!(in_contract(&env, || has_permission(
+            &env,
+            &admin_r,
+            &symbol_short!("operate")
+        )));
+        assert!(in_contract(&env, || has_permission(
+            &env,
+            &admin_r,
+            &symbol_short!("read")
+        )));
     }
 
     // ── Issue #586: crate-root export ──

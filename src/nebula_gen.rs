@@ -538,7 +538,9 @@ impl NebulaGen {
             return Err(NebulaError::InvalidTtl);
         }
         config.layout_ttl = new_ttl;
-        env.storage().instance().set(&DataKey::NebulaGenConfig, &config);
+        env.storage()
+            .instance()
+            .set(&DataKey::NebulaGenConfig, &config);
         Ok(())
     }
 

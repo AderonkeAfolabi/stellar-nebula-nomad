@@ -178,7 +178,9 @@ pub fn set_admin(env: &Env, admin: &Address) -> Result<(), ContentToolsError> {
 }
 
 fn get_admin(env: &Env) -> Option<Address> {
-    env.storage().persistent().get(&ContentDataKey::ContentAdmin)
+    env.storage()
+        .persistent()
+        .get(&ContentDataKey::ContentAdmin)
 }
 
 fn require_admin(env: &Env, caller: &Address) -> Result<(), ContentToolsError> {
@@ -944,9 +946,13 @@ mod tests {
 
         // Need admin to approve first
         at(&env, &id, || set_admin(&env, &creator).unwrap());
-        at(&env, &id, || approve_content(&env, &creator, content_id).unwrap());
+        at(&env, &id, || {
+            approve_content(&env, &creator, content_id).unwrap()
+        });
 
-        at(&env, &id, || vote_content(&env, &voter, content_id, 5).unwrap());
+        at(&env, &id, || {
+            vote_content(&env, &voter, content_id, 5).unwrap()
+        });
         let result = at(&env, &id, || get_vote_result(&env, content_id));
         assert_eq!(result.total_votes, 1);
     }

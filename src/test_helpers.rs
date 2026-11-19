@@ -65,7 +65,6 @@ pub fn in_contract<T>(env: &Env, f: impl FnOnce() -> T) -> T {
     env.as_contract(&unit_contract_id(env), f)
 }
 
-
 /// Create a fresh [`Env`] with deterministic ledger settings and return it
 /// together with a registered contract client and a generated player address.
 ///

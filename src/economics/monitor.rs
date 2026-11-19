@@ -40,7 +40,9 @@ pub fn initialize_monitor(env: &Env, admin: &Address) {
         inflation_rate_bps: 500, // 5% default
         last_update: env.ledger().timestamp(),
     };
-    env.storage().persistent().set(&EconKey::EconMonitorMetrics, &metrics);
+    env.storage()
+        .persistent()
+        .set(&EconKey::EconMonitorMetrics, &metrics);
 }
 
 /// Update token supply metrics
@@ -53,24 +55,26 @@ pub fn update_supply_metrics(
 ) {
     admin.require_auth();
 
-    let mut metrics: EconomicMetrics =
-        env.storage()
-            .persistent()
-            .get(&EconKey::EconMonitorMetrics)
-            .unwrap_or(EconomicMetrics {
-                total_supply: 0,
-                circulating_supply: 0,
-                staked_supply: 0,
-                inflation_rate_bps: 500,
-                last_update: 0,
-            });
+    let mut metrics: EconomicMetrics = env
+        .storage()
+        .persistent()
+        .get(&EconKey::EconMonitorMetrics)
+        .unwrap_or(EconomicMetrics {
+            total_supply: 0,
+            circulating_supply: 0,
+            staked_supply: 0,
+            inflation_rate_bps: 500,
+            last_update: 0,
+        });
 
     metrics.total_supply = total_supply;
     metrics.circulating_supply = circulating_supply;
     metrics.staked_supply = staked_supply;
     metrics.last_update = env.ledger().timestamp();
 
-    env.storage().persistent().set(&EconKey::EconMonitorMetrics, &metrics);
+    env.storage()
+        .persistent()
+        .set(&EconKey::EconMonitorMetrics, &metrics);
 
     env.events().publish(
         (symbol_short!("econ"), symbol_short!("supply")),

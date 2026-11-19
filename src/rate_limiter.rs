@@ -331,7 +331,12 @@ mod tests {
 
         // Default: 5 calls / 60 s for NebulaGeneration
         for _ in 0..5 {
-            assert!(in_contract(&env, || check_rate_limit(&env, &caller, Operation::NebulaGeneration)).is_ok());
+            assert!(in_contract(&env, || check_rate_limit(
+                &env,
+                &caller,
+                Operation::NebulaGeneration
+            ))
+            .is_ok());
         }
     }
 
@@ -341,9 +346,14 @@ mod tests {
         let caller = Address::generate(&env);
 
         for _ in 0..5 {
-            in_contract(&env, || check_rate_limit(&env, &caller, Operation::NebulaGeneration)).ok();
+            in_contract(&env, || {
+                check_rate_limit(&env, &caller, Operation::NebulaGeneration)
+            })
+            .ok();
         }
-        let result = in_contract(&env, || check_rate_limit(&env, &caller, Operation::NebulaGeneration));
+        let result = in_contract(&env, || {
+            check_rate_limit(&env, &caller, Operation::NebulaGeneration)
+        });
         assert_eq!(result, Err(RateLimitError::RateLimitExceeded));
     }
 
@@ -355,14 +365,26 @@ mod tests {
 
         // Exhaust caller1's limit
         for _ in 0..5 {
-            in_contract(&env, || check_rate_limit(&env, &caller1, Operation::NebulaGeneration)).ok();
+            in_contract(&env, || {
+                check_rate_limit(&env, &caller1, Operation::NebulaGeneration)
+            })
+            .ok();
         }
         assert_eq!(
-            in_contract(&env, || check_rate_limit(&env, &caller1, Operation::NebulaGeneration)),
+            in_contract(&env, || check_rate_limit(
+                &env,
+                &caller1,
+                Operation::NebulaGeneration
+            )),
             Err(RateLimitError::RateLimitExceeded)
         );
         // caller2 is unaffected
-        assert!(in_contract(&env, || check_rate_limit(&env, &caller2, Operation::NebulaGeneration)).is_ok());
+        assert!(in_contract(&env, || check_rate_limit(
+            &env,
+            &caller2,
+            Operation::NebulaGeneration
+        ))
+        .is_ok());
     }
 
     #[test]
@@ -372,14 +394,26 @@ mod tests {
 
         // Exhaust NebulaGeneration (5 calls)
         for _ in 0..5 {
-            in_contract(&env, || check_rate_limit(&env, &caller, Operation::NebulaGeneration)).ok();
+            in_contract(&env, || {
+                check_rate_limit(&env, &caller, Operation::NebulaGeneration)
+            })
+            .ok();
         }
         assert_eq!(
-            in_contract(&env, || check_rate_limit(&env, &caller, Operation::NebulaGeneration)),
+            in_contract(&env, || check_rate_limit(
+                &env,
+                &caller,
+                Operation::NebulaGeneration
+            )),
             Err(RateLimitError::RateLimitExceeded)
         );
         // ResourceMinting limit is independent (10 calls / 60 s)
-        assert!(in_contract(&env, || check_rate_limit(&env, &caller, Operation::ResourceMinting)).is_ok());
+        assert!(in_contract(&env, || check_rate_limit(
+            &env,
+            &caller,
+            Operation::ResourceMinting
+        ))
+        .is_ok());
     }
 
     #[test]
@@ -390,21 +424,37 @@ mod tests {
         in_contract(&env, || access_control::init_roles(&env, admin.clone())).unwrap();
 
         // Set a very tight limit: 2 calls / 120 s
-        in_contract(&env, || set_rate_limit_config(
-            &env,
-            &admin,
-            Operation::ResourceMinting,
-            RateLimitConfig {
-                max_calls: 2,
-                window_seconds: 120,
-            },
-        ))
+        in_contract(&env, || {
+            set_rate_limit_config(
+                &env,
+                &admin,
+                Operation::ResourceMinting,
+                RateLimitConfig {
+                    max_calls: 2,
+                    window_seconds: 120,
+                },
+            )
+        })
         .unwrap();
 
-        assert!(in_contract(&env, || check_rate_limit(&env, &user, Operation::ResourceMinting)).is_ok());
-        assert!(in_contract(&env, || check_rate_limit(&env, &user, Operation::ResourceMinting)).is_ok());
+        assert!(in_contract(&env, || check_rate_limit(
+            &env,
+            &user,
+            Operation::ResourceMinting
+        ))
+        .is_ok());
+        assert!(in_contract(&env, || check_rate_limit(
+            &env,
+            &user,
+            Operation::ResourceMinting
+        ))
+        .is_ok());
         assert_eq!(
-            in_contract(&env, || check_rate_limit(&env, &user, Operation::ResourceMinting)),
+            in_contract(&env, || check_rate_limit(
+                &env,
+                &user,
+                Operation::ResourceMinting
+            )),
             Err(RateLimitError::RateLimitExceeded)
         );
     }
@@ -468,10 +518,19 @@ mod tests {
         let caller = Address::generate(&env);
 
         for _ in 0..3 {
-            assert!(in_contract(&env, || check_rate_limit(&env, &caller, Operation::ShipUpgrade)).is_ok());
+            assert!(in_contract(&env, || check_rate_limit(
+                &env,
+                &caller,
+                Operation::ShipUpgrade
+            ))
+            .is_ok());
         }
         assert_eq!(
-            in_contract(&env, || check_rate_limit(&env, &caller, Operation::ShipUpgrade)),
+            in_contract(&env, || check_rate_limit(
+                &env,
+                &caller,
+                Operation::ShipUpgrade
+            )),
             Err(RateLimitError::RateLimitExceeded)
         );
     }

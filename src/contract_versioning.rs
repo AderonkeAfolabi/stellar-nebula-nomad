@@ -73,7 +73,11 @@ pub struct MigrationRecord {
 
 /// Initialize the versioning system at deployment.
 pub fn initialize_version(env: &Env) {
-    if !env.storage().instance().has(&VersioningKey::VersioningVersion) {
+    if !env
+        .storage()
+        .instance()
+        .has(&VersioningKey::VersioningVersion)
+    {
         env.storage()
             .instance()
             .set(&VersioningKey::VersioningVersion, &CURRENT_VERSION);

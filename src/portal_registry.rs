@@ -108,7 +108,9 @@ fn travel_cost(stability_pct: u32) -> i128 {
 pub fn initialize_portal_registry(env: &Env, admin: &Address) {
     admin.require_auth();
     env.storage().instance().set(&PortalKey::PortalAdmin, admin);
-    env.storage().instance().set(&PortalKey::PortalCounter, &0u64);
+    env.storage()
+        .instance()
+        .set(&PortalKey::PortalCounter, &0u64);
 }
 
 /// Register a new portal between two nebulae (owner-only).

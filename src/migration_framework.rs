@@ -158,7 +158,9 @@ pub fn initialize_migrations(
         .instance()
         .has(&MigrationKey::CurrentSchemaVersion)
     {
-        env.storage().instance().set(&MigrationKey::MigrationAdmin, admin);
+        env.storage()
+            .instance()
+            .set(&MigrationKey::MigrationAdmin, admin);
         env.storage()
             .instance()
             .set(&MigrationKey::CurrentSchemaVersion, &initial_version);
@@ -473,12 +475,17 @@ mod tests {
         let contract = env.register(StubContract, ());
 
         at(&env, &contract, || initialize_migrations(&env, &admin, 1)).unwrap();
-        let record = at(&env, &contract, || plan_migration(&env, &admin, 1, 2, symbol_short!("plan_v2"))).unwrap();
+        let record = at(&env, &contract, || {
+            plan_migration(&env, &admin, 1, 2, symbol_short!("plan_v2"))
+        })
+        .unwrap();
         assert_eq!(record.from_version, 1);
         assert_eq!(record.to_version, 2);
 
         // from_version > current_version yields error
-        let err = at(&env, &contract, || plan_migration(&env, &admin, 5, 6, symbol_short!("invalid")));
+        let err = at(&env, &contract, || {
+            plan_migration(&env, &admin, 5, 6, symbol_short!("invalid"))
+        });
         assert_eq!(err, Err(MigrationError::IncompatibleSchema));
     }
 
@@ -488,20 +495,29 @@ mod tests {
         let contract = env.register(StubContract, ());
 
         at(&env, &contract, || initialize_migrations(&env, &admin, 1)).unwrap();
-        let record = at(&env, &contract, || plan_migration(&env, &admin, 1, 2, symbol_short!("plan_v2"))).unwrap();
+        let record = at(&env, &contract, || {
+            plan_migration(&env, &admin, 1, 2, symbol_short!("plan_v2"))
+        })
+        .unwrap();
 
         let mut sample_data = Vec::new(&env);
         sample_data.push_back(Bytes::from_slice(&env, b"payload1"));
         sample_data.push_back(Bytes::from_slice(&env, b"payload2"));
 
-        let report = at(&env, &contract, || dry_run_migration(&env, &admin, record.id, sample_data)).unwrap();
+        let report = at(&env, &contract, || {
+            dry_run_migration(&env, &admin, record.id, sample_data)
+        })
+        .unwrap();
         assert!(report.would_succeed);
         assert_eq!(report.records_affected, 2);
 
         // Empty record triggers validation error in dry run
         let mut invalid_sample = Vec::new(&env);
         invalid_sample.push_back(Bytes::new(&env));
-        let report_fail = at(&env, &contract, || dry_run_migration(&env, &admin, record.id, invalid_sample)).unwrap();
+        let report_fail = at(&env, &contract, || {
+            dry_run_migration(&env, &admin, record.id, invalid_sample)
+        })
+        .unwrap();
         assert!(!report_fail.would_succeed);
 
         // Batch size exceeding MAX_MIGRATION_BATCH yields error
@@ -509,7 +525,9 @@ mod tests {
         for _ in 0..MAX_MIGRATION_BATCH + 1 {
             oversized.push_back(Bytes::from_slice(&env, b"x"));
         }
-        let err = at(&env, &contract, || dry_run_migration(&env, &admin, record.id, oversized));
+        let err = at(&env, &contract, || {
+            dry_run_migration(&env, &admin, record.id, oversized)
+        });
         assert_eq!(err, Err(MigrationError::BatchTooLarge));
     }
 
@@ -519,21 +537,31 @@ mod tests {
         let contract = env.register(StubContract, ());
 
         at(&env, &contract, || initialize_migrations(&env, &admin, 1)).unwrap();
-        let record = at(&env, &contract, || plan_migration(&env, &admin, 1, 2, symbol_short!("v2"))).unwrap();
+        let record = at(&env, &contract, || {
+            plan_migration(&env, &admin, 1, 2, symbol_short!("v2"))
+        })
+        .unwrap();
 
         let mut batch_data = Vec::new(&env);
         batch_data.push_back(Bytes::from_slice(&env, b"data1"));
 
-        let batch_state =
-            at(&env, &contract, || execute_migration_batch(&env, &admin, record.id, 0, 1, batch_data)).unwrap();
+        let batch_state = at(&env, &contract, || {
+            execute_migration_batch(&env, &admin, record.id, 0, 1, batch_data)
+        })
+        .unwrap();
         assert_eq!(batch_state.records_processed, 1);
         assert_eq!(batch_state.migration_id, record.id);
 
         // Rollback succeeds when checkpoint exists
-        at(&env, &contract, || rollback_migration(&env, &admin, record.id)).unwrap();
+        at(&env, &contract, || {
+            rollback_migration(&env, &admin, record.id)
+        })
+        .unwrap();
 
         // Second rollback fails because checkpoint was consumed/removed
-        let err = at(&env, &contract, || rollback_migration(&env, &admin, record.id));
+        let err = at(&env, &contract, || {
+            rollback_migration(&env, &admin, record.id)
+        });
         assert_eq!(err, Err(MigrationError::NoCheckpoint));
     }
 
@@ -554,7 +582,10 @@ mod tests {
         let contract = env.register(StubContract, ());
 
         at(&env, &contract, || initialize_migrations(&env, &admin, 1)).unwrap();
-        at(&env, &contract, || record_migration_completion(&env, &admin, 101, 1, 2, 50)).unwrap();
+        at(&env, &contract, || {
+            record_migration_completion(&env, &admin, 101, 1, 2, 50)
+        })
+        .unwrap();
     }
 
     #[test]
@@ -567,11 +598,23 @@ mod tests {
 
         let samples: Vec<Bytes> = Vec::new(&env);
         assert_eq!(
-            at(&env, &contract, || plan_migration(&env, &intruder, 1, 2, symbol_short!("v2"))),
+            at(&env, &contract, || plan_migration(
+                &env,
+                &intruder,
+                1,
+                2,
+                symbol_short!("v2")
+            )),
             Err(MigrationError::Unauthorized)
         );
         assert_eq!(
-            at(&env, &contract, || dry_run_migration(&env, &intruder, 1, samples.clone())).err(),
+            at(&env, &contract, || dry_run_migration(
+                &env,
+                &intruder,
+                1,
+                samples.clone()
+            ))
+            .err(),
             Some(MigrationError::Unauthorized)
         );
         assert_eq!(
@@ -579,7 +622,10 @@ mod tests {
             Err(MigrationError::Unauthorized)
         );
         assert_eq!(
-            at(&env, &contract, || execute_migration_batch(&env, &intruder, 1, 0, 1, samples)).err(),
+            at(&env, &contract, || execute_migration_batch(
+                &env, &intruder, 1, 0, 1, samples
+            ))
+            .err(),
             Some(MigrationError::Unauthorized)
         );
         assert_eq!(
@@ -587,7 +633,9 @@ mod tests {
             Err(MigrationError::Unauthorized)
         );
         assert_eq!(
-            at(&env, &contract, || record_migration_completion(&env, &intruder, 1, 1, 2, 0)),
+            at(&env, &contract, || record_migration_completion(
+                &env, &intruder, 1, 1, 2, 0
+            )),
             Err(MigrationError::Unauthorized)
         );
     }
