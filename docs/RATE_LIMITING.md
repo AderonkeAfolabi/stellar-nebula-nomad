@@ -64,3 +64,31 @@ Limits are per address, so an attacker with many funded accounts is bounded by
 network fees, not by this module; sybil resistance lives in `bot_detection` and
 `anti_whale`. Windows are fixed (not sliding), so an address can burst up to
 `2 * max_calls` across a window boundary.
+
+## Module integration (Issue #585)
+
+After the upstream merge the limiter lives in `src/rate_limiter.rs` and is
+declared publicly in `src/lib.rs`:
+
+```rust
+/// Per-address rate limiting for sensitive contract operations.
+pub mod rate_limiter;
+```
+
+Every enforcing module imports it through the crate path, e.g.
+`use crate::rate_limiter::{check_rate_limit, Operation, RateLimitError};`
+(`resource_minter`, `nebula_gen`, `pvp_combat`, `tournament`, `crafting`,
+`trading`, ...). External integration tests reach it as
+`stellar_nebula_nomad::rate_limiter`, and the contract exposes the admin
+override as `NebulaNomadContract::set_rate_limit_config`.
+
+### Tests
+
+| Suite | What it covers |
+| --- | --- |
+| `src/rate_limiter.rs` (unit, 12 tests) | within-limit / over-limit calls, per-address and per-operation isolation, admin override, non-admin and zero-value rejection, window reset after expiry, default/override config reads, `("RateLimit", "hit")` event |
+| `tests/security/rate_limiting_tests.rs` | every `Operation` is enforced at its real entry point and recovers after its window |
+
+The unit tests call module functions directly, so each call runs inside its own
+contract frame via `test_helpers::in_contract` (Soroban SDK 22+ only allows
+storage access from a contract frame).

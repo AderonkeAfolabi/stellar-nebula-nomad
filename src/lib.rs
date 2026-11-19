@@ -41,20 +41,20 @@ mod content_tools;
 pub mod error_standard;
 pub mod traits;
 
+mod elo_rating;
 mod gifting_system;
 mod leaderboards;
+mod matchmaking;
 mod nebula_explorer;
 mod onboarding_tutorial;
 mod player_profile;
 mod player_segmentation;
 mod pvp_combat;
-mod elo_rating;
-mod matchmaking;
-mod ship_abilities;
 mod referral_system;
 /// Rate-limited resource minting and the player balance ledger.
 pub mod resource_minter;
 mod session_manager;
+mod ship_abilities;
 mod ship_nft;
 mod ship_registry;
 
@@ -150,11 +150,15 @@ mod rewards;
 pub mod seasons;
 pub mod trading;
 
+/// Pure bracket / pairing algorithms behind the tournament formats (Issue #587).
+pub mod bracket_generator;
 pub mod crafting;
 /// Crafting recipe registry and recipe validation.
 pub mod recipes;
 mod ship_customization;
 mod skins;
+/// Tournaments: four formats, registration, scheduling, forfeits, prizes,
+/// admin controls and dispute resolution (Issues #284, #537, #587).
 pub mod tournament;
 /// Player notification dispatch: threshold alerts and push delivery.
 pub mod notifications {
@@ -196,6 +200,8 @@ pub use reputation::{
     BehaviorRecord, BehaviorType, DisputeReport, ReportStatus, ReputationError, ReputationScore,
 };
 
+/// RBAC error type returned by the `init_rbac` / `grant_role` / `check_permission`
+/// family of contract entry points (Issue #586).
 pub use access_control::AccessControlError;
 pub use analytics::{AnalyticsError, GlobalStats};
 pub use blueprint_factory::{Blueprint, BlueprintError, BlueprintRarity};
@@ -254,11 +260,6 @@ pub use matchmaking::{
     MAX_QUEUE_WAIT_SECS, MAX_TEAM_SIZE, MMR_EXPAND_STEP, MMR_INITIAL_RANGE, REQUEUE_COOLDOWN_SECS,
 };
 // Issue #589 — Ship ability system with 5 abilities per ship type.
-pub use ship_abilities::{
-    get_abilities_for_type, get_ability_states, init_combat_abilities, is_ability_ready,
-    tick_cooldowns, use_ability, Ability, AbilityEffect, AbilityKey, AbilityState,
-    ShipAbilityLoadout, ABILITY_MAX_ENERGY, MAX_ABILITIES_PER_SHIP,
-};
 pub use referral_system::{Referral, ReferralError};
 pub use resource_minter::{
     balance_of, circulating_supply, credit_balance, debit_balance, move_balance, reduce_supply,
@@ -266,6 +267,11 @@ pub use resource_minter::{
     ResourceMinterContract, ResourceRecord, ResourceType,
 };
 pub use session_manager::{Session, SessionError};
+pub use ship_abilities::{
+    get_abilities_for_type, get_ability_states, init_combat_abilities, is_ability_ready,
+    tick_cooldowns, use_ability, Ability, AbilityEffect, AbilityKey, AbilityState,
+    ShipAbilityLoadout, ABILITY_MAX_ENERGY, MAX_ABILITIES_PER_SHIP,
+};
 pub use ship_nft::{DataKey as ShipDataKey, ShipError, ShipNft};
 pub use ship_registry::Ship;
 
@@ -4551,9 +4557,9 @@ impl NebulaNomadContract {
 // visibility. Re-declaring any of them here breaks the crate (E0428, #572).
 
 // Game Systems Modules (Issues #550-553)
-pub mod weather_system;
 pub mod challenge_system;
 pub mod skin_marketplace;
+pub mod weather_system;
 /// On-chain mini-games (poker, racing) with their own session state.
 pub mod mini_games {
     pub mod poker;

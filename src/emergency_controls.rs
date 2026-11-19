@@ -99,7 +99,9 @@ pub fn initialize_admins(env: &Env, admins: Vec<Address>) -> Result<(), Emergenc
     }
 
     env.storage().instance().set(&EmergencyKey::Admins, &admins);
-    env.storage().instance().set(&EmergencyKey::EmergencyPaused, &false);
+    env.storage()
+        .instance()
+        .set(&EmergencyKey::EmergencyPaused, &false);
 
     Ok(())
 }
@@ -126,7 +128,9 @@ pub fn pause_contract(env: &Env, admin: &Address) -> Result<(), EmergencyError> 
     admin.require_auth();
     require_admin(env, admin)?;
 
-    env.storage().instance().set(&EmergencyKey::EmergencyPaused, &true);
+    env.storage()
+        .instance()
+        .set(&EmergencyKey::EmergencyPaused, &true);
 
     env.events().publish(
         (symbol_short!("ctrl"), symbol_short!("paused")),
@@ -177,7 +181,9 @@ pub fn execute_unpause(env: &Env, admin: &Address) -> Result<(), EmergencyError>
         return Err(EmergencyError::UnpauseDelayNotMet);
     }
 
-    env.storage().instance().set(&EmergencyKey::EmergencyPaused, &false);
+    env.storage()
+        .instance()
+        .set(&EmergencyKey::EmergencyPaused, &false);
     env.storage().instance().remove(&EmergencyKey::UnpauseAt);
 
     env.events().publish(

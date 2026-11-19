@@ -119,7 +119,9 @@ impl Default for ModelParams {
 pub fn initialize(env: &Env, admin: &Address) -> Result<(), ForecastError> {
     admin.require_auth();
 
-    env.storage().instance().set(&DataKey::YieldForecastAdmin, admin);
+    env.storage()
+        .instance()
+        .set(&DataKey::YieldForecastAdmin, admin);
     env.storage().instance().set(&DataKey::ModelVersion, &1u32);
     env.storage()
         .instance()

@@ -116,7 +116,9 @@ fn load_session(env: &Env) -> ExportSession {
 }
 
 fn store_session(env: &Env, session: &ExportSession) {
-    env.storage().instance().set(&ExportKey::ExportSession, session);
+    env.storage()
+        .instance()
+        .set(&ExportKey::ExportSession, session);
 }
 
 fn append_bytes(target: &mut Bytes, data: &[u8]) {

@@ -83,7 +83,9 @@ pub fn start_session(env: &Env, owner: Address, ship_id: u64) -> Result<u64, Ses
         .get(&SessionKey::SessMgrSessionCount)
         .unwrap_or(0u64)
         + 1;
-    env.storage().instance().set(&SessionKey::SessMgrSessionCount, &id);
+    env.storage()
+        .instance()
+        .set(&SessionKey::SessMgrSessionCount, &id);
 
     let now = env.ledger().timestamp();
     let session = Session {
