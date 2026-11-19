@@ -116,7 +116,9 @@ pub struct ReferrerStats {
     pub suspicion_score: u32,
 }
 
-/// Leaderboard entry
+/// Referral-rewards leaderboard entry. Not the crate-root `LeaderboardEntry`
+/// (that is `leaderboards::LeaderboardEntry`), and not `analytics::LeaderboardEntry`.
+/// The two differ in fields and are separate on-chain types.
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[contracttype]
 pub struct LeaderboardEntry {

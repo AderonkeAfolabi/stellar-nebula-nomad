@@ -174,6 +174,11 @@ pub use content_tools::{
     DEFAULT_CREATOR_SHARE_BPS, DEFAULT_PLATFORM_SHARE_BPS, MAX_CONTENT_PER_CREATOR,
     MAX_CONTENT_PRICE, MAX_MARKETPLACE_LISTINGS,
 };
+// `LeaderboardEntry` names three types in this crate. The crate root exports
+// `leaderboards::LeaderboardEntry` (player score rankings). The analytics
+// snapshot type is `analytics::LeaderboardEntry`, and the referral type is
+// `rewards::LeaderboardEntry`. Both are reached by module path and are not
+// re-exported here. See the doc comment on `leaderboards::LeaderboardEntry`.
 pub use leaderboards::{
     AchievementEntry, GuildEntry, LeaderboardEntry, LeaderboardEntry as EnhancedLeaderboardEntry,
     LeaderboardError, LeaderboardRewards, PageMeta, RegionalEntry, CATEGORY_ACHIEVEMENTS,

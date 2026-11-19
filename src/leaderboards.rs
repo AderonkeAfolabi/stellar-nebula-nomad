@@ -81,6 +81,18 @@ pub enum LeaderboardDataKey {
 
 // ── Data Types ────────────────────────────────────────────────────────────────
 
+/// Player entry in the ranked leaderboard. This is the `LeaderboardEntry`
+/// exported from the crate root (`lib.rs`), and the one to use for player
+/// rankings by score.
+///
+/// Two other types share the name and are NOT interchangeable with this one:
+/// - `analytics::LeaderboardEntry`: a cosmic-essence snapshot entry, returned
+///   by `snapshot_leaderboard`.
+/// - `rewards::LeaderboardEntry`: a referral-rewards entry, returned by
+///   `rewards::get_leaderboard`.
+///
+/// They are separate on-chain `contracttype`s with different fields, so
+/// merging them would change the contract ABI and needs a migration.
 #[contracttype]
 #[derive(Clone, Debug)]
 pub struct LeaderboardEntry {
