@@ -4318,6 +4318,33 @@ impl NebulaNomadContract {
     pub fn get_global_staking_stats(env: Env) -> GlobalStakingStats {
         staking::get_global_staking_stats(&env)
     }
+
+    // ─── Weather System (Issues #553, #630) ──────────────────────────────
+
+    /// Current weather in a region.
+    pub fn get_region_weather(env: Env, region_id: u64) -> weather_system::WeatherState {
+        weather_system::get_current_weather(&env, region_id)
+    }
+
+    /// 24-hour forecast for a region.
+    pub fn get_weather_forecast(env: Env, region_id: u64) -> Vec<weather_system::WeatherForecast> {
+        weather_system::generate_forecast(&env, region_id)
+    }
+
+    /// Effective weather modifiers in a region right now.
+    pub fn get_weather_effects(env: Env, region_id: u64) -> weather_system::WeatherImpact {
+        weather_system::get_weather_impact(&env, region_id)
+    }
+
+    /// Set a region's climate weights (admin only).
+    pub fn set_region_climate(
+        env: Env,
+        admin: Address,
+        region_id: u64,
+        weights: Vec<u32>,
+    ) -> Result<(), weather_system::WeatherError> {
+        weather_system::set_region_climate(&env, &admin, region_id, weights)
+    }
 }
 
 // Game Systems Modules (Issues #528-531)
