@@ -240,7 +240,7 @@ pub fn generate_forecast(env: &Env, region_id: u64) -> Vec<WeatherForecast> {
             weather: weather_type,
             intensity: 20 + (seed % 80) as u32,
             starts_at: timestamp + hour * 3600,
-            confidence: (80u32.saturating_sub(hour * 2)).max(30),
+            confidence: (80u32.saturating_sub((hour * 2) as u32)).max(30),
         });
     }
 
