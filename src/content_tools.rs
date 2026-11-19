@@ -31,6 +31,8 @@ pub enum ContentToolsError {
     ContentRejected = 9,
     /// Admin has already been set; set_admin is a one-time initializer (Issue #237).
     AlreadyInitialized = 10,
+    /// A checked arithmetic operation overflowed during revenue splitting.
+    ArithmeticOverflow = 11,
 }
 
 impl crate::error_standard::StandardContractError for ContentToolsError {
@@ -44,7 +46,9 @@ impl crate::error_standard::StandardContractError for ContentToolsError {
             | Self::AlreadyInitialized => (ErrorKind::Conflict, false),
             Self::ContentNotFound => (ErrorKind::NotFound, false),
             Self::Unauthorized => (ErrorKind::Authorization, false),
-            Self::InvalidContent | Self::InvalidRating => (ErrorKind::Validation, false),
+            Self::InvalidContent | Self::InvalidRating | Self::ArithmeticOverflow => {
+                (ErrorKind::Validation, false)
+            }
             Self::ContentLimitReached => (ErrorKind::ResourceLimit, false),
         };
         crate::error_standard::ErrorDescriptor {
@@ -773,14 +777,30 @@ pub fn purchase_content(
 
     // Calculate revenue split
     let config = get_revenue_split_config(env);
-    let creator_share = content.price * (config.creator_share_bps as i128) / 10000;
-    let platform_share = content.price * (config.platform_share_bps as i128) / 10000;
+    // Basis-point multiplication is checked: a hostile price or misconfigured
+    // share must fail with a contract error rather than trap in release WASM.
+    let creator_share = crate::safe_math::checked_mul_div_i128(
+        content.price,
+        i128::from(config.creator_share_bps),
+        10_000,
+    )
+    .ok_or(ContentToolsError::ArithmeticOverflow)?;
+    let platform_share = crate::safe_math::checked_mul_div_i128(
+        content.price,
+        i128::from(config.platform_share_bps),
+        10_000,
+    )
+    .ok_or(ContentToolsError::ArithmeticOverflow)?;
 
-    // Verify total matches (handle rounding)
-    debug_assert!(
-        creator_share + platform_share <= content.price,
-        "revenue split exceeds price"
-    );
+    // Enforce the invariant at runtime (a `debug_assert!` is compiled out of
+    // release WASM and therefore provided no protection at all).
+    if creator_share
+        .checked_add(platform_share)
+        .ok_or(ContentToolsError::ArithmeticOverflow)?
+        > content.price
+    {
+        return Err(ContentToolsError::ArithmeticOverflow);
+    }
 
     // Credit creator revenue
     let creator_rev_key = ContentDataKey::CreatorRevenue(content.creator.clone());

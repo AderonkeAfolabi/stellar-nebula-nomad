@@ -15,6 +15,9 @@ alerting:
 # Load alert rules
 rule_files:
   - 'alert-rules.yml'
+  # Backup-health rules (BackupFailed / NoRecentBackup). Mounted into the
+  # container by monitoring/docker-compose.yml.
+  - 'backup-monitoring.yml'
 
 # Scrape configurations
 scrape_configs:

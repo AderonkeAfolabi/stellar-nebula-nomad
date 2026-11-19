@@ -41,17 +41,23 @@ jobs:
           ./scripts/backup.sh
 
       - name: Upload backup to S3
-        if: ${{ secrets.AWS_ACCESS_KEY_ID != '' }}
+        # GitHub Actions does not allow `secrets.*` in step-level `if:`
+        # expressions. Gate in the shell instead so this step actually runs
+        # when credentials are configured.
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           AWS_DEFAULT_REGION: ${{ secrets.AWS_REGION || 'us-east-1' }}
           S3_BUCKET: ${{ secrets.S3_BACKUP_BUCKET }}
         run: |
-          aws s3 cp backups/*.tar.gz s3://$S3_BUCKET/backups/ --recursive
+          if [ -z "${S3_BUCKET:-}" ] || [ -z "${AWS_ACCESS_KEY_ID:-}" ] || [ -z "${AWS_SECRET_ACCESS_KEY:-}" ]; then
+            echo "S3 backup not configured (S3_BUCKET / AWS credentials missing); skipping."
+            exit 0
+          fi
+          aws s3 cp backups/*.tar.gz "s3://$S3_BUCKET/backups/" --recursive
 
       - name: Upload backup artifact
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v4
         with:
           name: backup-${{ github.run_number }}
           path: backups/*.tar.gz
@@ -99,21 +105,35 @@ jobs:
 
   monthly-drill:
     runs-on: ubuntu-latest
-    # Run on first Monday of each month
-    if: github.event.schedule == '0 2 * * *' && github.event_name == 'schedule'
     needs: backup
+    if: github.event_name == 'schedule'
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
+      # The schedule fires daily; only the first Monday of the month is the
+      # monthly drill. Compute the gate in the shell rather than relying on an
+      # `if:` expression that GitHub Actions cannot evaluate for dates.
+      - name: First-Monday gate
+        id: gate
+        run: |
+          if [ "$(date -u +%u)" = "1" ] && [ "$(date -u +%d)" -le 7 ]; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "run=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Download latest backup
-        uses: actions/download-artifact@v8
+        if: steps.gate.outputs.run == 'true'
+        uses: actions/download-artifact@v4
         with:
           name: backup-${{ github.run_number }}
           path: backups/
 
       - name: Run disaster recovery drill
+        id: drill
+        if: steps.gate.outputs.run == 'true'
         run: |
           chmod +x scripts/restore.sh
           LATEST_BACKUP=$(ls -t backups/*.tar.gz | head -n 1)
@@ -123,14 +143,17 @@ jobs:
             --dry-run
 
       - name: Generate drill report
+        if: always() && steps.gate.outputs.run == 'true'
         run: |
           echo "# Disaster Recovery Drill Report" > drill-report.md
-          echo "Date: $(date)" >> drill-report.md
-          echo "Status: Success" >> drill-report.md
-          echo "Recovery Time: < 1 hour" >> drill-report.md
+          echo "Date: $(date -u +%Y-%m-%dT%H:%M:%SZ)" >> drill-report.md
+          echo "Status: ${{ steps.drill.outcome }}" >> drill-report.md
+          echo "Recovery Time target: < 1 hour (measured\: see restore report)" >> drill-report.md
+          echo "Note: dry-run only; full Scenario 4 requires a quarterly manual drill." >> drill-report.md
 
       - name: Upload drill report
-        uses: actions/upload-artifact@v7
+        if: always() && steps.gate.outputs.run == 'true'
+        uses: actions/upload-artifact@v4
         with:
           name: drill-report-${{ github.run_number }}
           path: drill-report.md

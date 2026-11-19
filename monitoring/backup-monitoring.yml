@@ -15,19 +15,19 @@ groups:
         annotations:
           summary: "Backup operation failed"
           description: "Last backup attempt failed. Check backup logs immediately."
-          runbook: "https://github.com/yourorg/stellar-nebula-nomad/blob/main/DISASTER_RECOVERY.md#backup-issues"
+          runbook: "https://github.com/Space-Nebula/stellar-nebula-nomad/blob/main/DISASTER_RECOVERY.md"
 
       # Critical: No recent backup
       - alert: NoRecentBackup
-        expr: (time() - backup_last_success_timestamp) > 172800
+        expr: (time() - backup_last_success_timestamp) > 90000
         for: 10m
         labels:
           severity: critical
           component: backup
         annotations:
-          summary: "No successful backup in 48 hours"
-          description: "Last successful backup was more than 48 hours ago. Immediate action required."
-          runbook: "https://github.com/yourorg/stellar-nebula-nomad/blob/main/DISASTER_RECOVERY.md#troubleshooting"
+          summary: "No successful backup in 25 hours"
+          description: "Last successful backup was more than 25 hours ago (RPO is 24h). Immediate action required."
+          runbook: "https://github.com/Space-Nebula/stellar-nebula-nomad/blob/main/DISASTER_RECOVERY.md"
 
       # Warning: Backup duration high
       - alert: BackupDurationHigh

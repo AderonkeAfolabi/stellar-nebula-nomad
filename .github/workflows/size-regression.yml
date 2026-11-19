@@ -54,73 +54,20 @@ jobs:
         id: measure
         run: |
           SIZES=$(python3 -c "
-import json, os, glob
-sizes = {}
-for f in glob.glob('wasm/*.optimized.wasm'):
-    name = os.path.basename(f)
-    size = os.path.getsize(f)
-    sizes[name] = size
-print(json.dumps(sizes))
-")
+            import json, os, glob
+            sizes = {}
+            for f in glob.glob('wasm/*.optimized.wasm'):
+                name = os.path.basename(f)
+                size = os.path.getsize(f)
+                sizes[name] = size
+            print(json.dumps(sizes))
+          ")
           echo "sizes=$SIZES" >> $GITHUB_OUTPUT
           echo "$SIZES" | python3 -m json.tool
 
       - name: Compare against baseline
         id: compare
-        run: |
-          python3 << 'PYEOF'
-import json, os
-
-baseline_file = os.environ.get('WASM_BASELINE_FILE', '.wasm-sizes.json')
-sizes_raw = os.environ.get('SIZES')
-if not sizes_raw:
-    print("No sizes data available")
-    exit(0)
-
-sizes = json.loads(sizes_raw)
-baseline = {}
-if os.path.exists(baseline_file):
-    with open(baseline_file) as f:
-        baseline = json.load(f)
-
-MAX_INCREASE_PCT = 10
-failed = False
-report_lines = []
-
-for name, current_size in sorted(sizes.items()):
-    if name in baseline:
-        prev_size = baseline[name]
-        if prev_size > 0:
-            pct_change = ((current_size - prev_size) / prev_size) * 100
-            if pct_change > MAX_INCREASE_PCT:
-                failed = True
-                report_lines.append(f"❌ **{name}**: {prev_size} → {current_size} bytes (+{pct_change:.1f}%) — exceeds {MAX_INCREASE_PCT}% threshold")
-            elif pct_change > 0:
-                report_lines.append(f"⚠️ **{name}**: {prev_size} → {current_size} bytes (+{pct_change:.1f}%)")
-            elif pct_change < 0:
-                report_lines.append(f"✅ **{name}**: {prev_size} → {current_size} bytes ({pct_change:.1f}%) — size decreased")
-            else:
-                report_lines.append(f"✅ **{name}**: {current_size} bytes (unchanged)")
-        else:
-            report_lines.append(f"📄 **{name}**: {current_size} bytes (new, previous was 0)")
-    else:
-        report_lines.append(f"📄 **{name}**: {current_size} bytes (new — no baseline)")
-
-# Check 64KB limit
-MAX_BYTES = 65536
-for name, current_size in sizes.items():
-    if current_size > MAX_BYTES:
-        failed = True
-        report_lines.append(f"❌ **{name}**: {current_size} bytes exceeds 64 KB limit")
-
-report = "\n".join(report_lines)
-print(f"report={report}")
-print(f"failed={'true' if failed else 'false'}")
-
-# Save sizes as new baseline
-with open(baseline_file, 'w') as f:
-    json.dump(sizes, f, indent=2)
-PYEOF
+        run: python3 scripts/check-wasm-sizes.py
         env:
           SIZES: ${{ steps.measure.outputs.sizes }}
           WASM_BASELINE_FILE: ${{ env.WASM_BASELINE_FILE }}

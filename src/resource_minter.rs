@@ -196,65 +196,15 @@ impl ResourceMinterContract {
         // ── Auth ───────────────────────────────────────────────
         caller.require_auth();
 
-        // ── Rate limit check (Issue #175) ──────────────────────
-        check_rate_limit(env, &caller, Operation::ResourceMinting).map_err(MinterError::from)?;
-
-        // ── Basic validation ───────────────────────────────────
-        if amount == 0 {
-            return Err(MinterError::InvalidAmount);
-        }
-
-        // ── Confirm anomaly exists for this ship ───────────────
-        NebulaGen::has_anomaly(env.clone(), ship_id, anomaly_index).map_err(|e| match e {
-            NebulaGenError::LayoutNotFound => MinterError::NoLayoutForShip,
-            NebulaGenError::AnomalyOutOfBounds => MinterError::NoResourceAtAnomaly,
-            _ => MinterError::NoLayoutForShip,
-        })?;
-
-        // ── Anti-Whale checks (Issue #455 / #502) ──────────────
-        check_operation(env, &caller, OpKind::Mint, 1)?;
-        let (effective_amount, _progressive_fee) = process_anti_whale_action(env, &caller, amount)?;
-
-        // ── Update balances (checked: Issue #239) ──────────────
-        let balance_key = MinterKey::Balance(caller.clone(), resource_type.clone());
-        let current: u64 = env.storage().persistent().get(&balance_key).unwrap_or(0);
-        let new_balance = current
-            .checked_add(effective_amount)
-            .ok_or(MinterError::ArithmeticOverflow)?;
-        env.storage().persistent().set(&balance_key, &new_balance);
-
-        let supply_key = MinterKey::TotalSupply(resource_type.clone());
-        let supply: u64 = env.storage().persistent().get(&supply_key).unwrap_or(0);
-        let new_supply = supply
-            .checked_add(effective_amount)
-            .ok_or(MinterError::ArithmeticOverflow)?;
-        env.storage().persistent().set(&supply_key, &new_supply);
-
-        // ── Cumulative mint counter (Issue #281) ───────────────
-        // Unlike TotalSupply this is monotonic — burning reduces supply but
-        // never the historical mint total, which is the denominator of the
-        // deflation rate.
-        let minted_key = MinterKey::TotalMinted(resource_type.clone());
-        let minted: u64 = env.storage().persistent().get(&minted_key).unwrap_or(0);
-        let new_minted = minted
-            .checked_add(effective_amount)
-            .ok_or(MinterError::ArithmeticOverflow)?;
-        env.storage().persistent().set(&minted_key, &new_minted);
-
-        let record = ResourceRecord {
-            owner: caller.clone(),
-            resource_type: resource_type.clone(),
-            amount: effective_amount,
-            minted_at: env.ledger().timestamp(),
-        };
-
-        // ── Emit event ─────────────────────────────────────────
-        env.events().publish(
-            (symbol_short!("Minter"), symbol_short!("minted")),
-            (caller, resource_type, effective_amount),
-        );
-
-        Ok(record)
+        // ── Guard (Issue #472) ─────────────────────────────────
+        // The whole auth → check → effect → interaction sequence runs under
+        // the global lock. A custom-account `require_auth` callback that tries
+        // to re-enter this function observes the lock and is rejected. The
+        // body lives in `mint_resource_unguarded` so composite callers that
+        // already hold the lock can reuse it without self-blocking.
+        with_guard(env, || {
+            mint_resource_unguarded(env, caller, ship_id, anomaly_index, resource_type, amount)
+        })
     }
 
     /// Query the balance of `owner` for `resource_type`.
@@ -788,7 +738,14 @@ pub(crate) fn harvest_resources_unguarded(
         let Some(entry) = raw.get(i) else {
             continue;
         };
-        let scaled = u64::from(entry.amount) * effective_total / u64::from(raw_total);
+        // Pro-rata scaling: multiply before dividing to preserve precision,
+        // but guard both the product and the (non-zero) denominator.
+        let scaled = crate::safe_math::checked_mul_div_u64(
+            u64::from(entry.amount),
+            effective_total,
+            u64::from(raw_total),
+        )
+        .ok_or(HarvestError::PriceOverflow)?;
         let amount = u32::try_from(scaled).unwrap_or(u32::MAX);
         if amount == 0 {
             continue;

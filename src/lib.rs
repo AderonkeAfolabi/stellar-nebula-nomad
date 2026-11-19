@@ -39,6 +39,8 @@ mod blueprint_factory;
 pub mod constants;
 mod content_tools;
 pub mod error_standard;
+/// Overflow-safe arithmetic primitives shared by the economic modules.
+pub mod safe_math;
 pub mod traits;
 
 mod gifting_system;
@@ -187,7 +189,7 @@ pub mod input_validation;
 mod nomad_bonding;
 mod player_housing;
 mod quest_system;
-mod reentrancy_guard;
+pub mod reentrancy_guard;
 mod reputation;
 mod validation_macros;
 
