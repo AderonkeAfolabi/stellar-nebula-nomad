@@ -148,12 +148,13 @@ fn fuzz_ship_level_upgrade_arithmetic() {
 #[test]
 fn fuzz_ship_name_length_boundaries() {
     // Ship names with 0 chars, 1 char, max allowed, and over-max must be validated.
+    let long_name = "A".repeat(65);
     let cases: Vec<(&str, bool)> = vec![
         ("", false),           // empty → invalid
         ("X", true),           // single char → valid
         ("ValidName", true),   // normal → valid
         // 65-char string → exceeds typical 64-byte on-chain limit
-        (&"A".repeat(65), false),
+        (long_name.as_str(), false),
     ];
     for (name, expected_valid) in cases {
         let is_valid = !name.is_empty() && name.len() <= 64;
