@@ -1,3 +1,12 @@
+//! Stellar Nebula Nomad — a decentralized space-exploration simulation on Soroban.
+//!
+//! The crate is a suite of contract modules covering procedural nebula
+//! generation, NFT ships, resource economics, guilds, governance, and the
+//! operational safety rails (rate limiting, emergency controls, reentrancy
+//! guards) around them. Modules are re-exported flatly from the crate root so
+//! callers can name types without walking the module tree; see
+//! `docs/API_REFERENCE.md` for the curated public surface.
+
 #![no_std]
 // Soroban SDK 28 deprecates `events().publish` (in favour of `#[contractevent]`
 // types) and `Env::register_contract` (in favour of `register`). Migrating the
@@ -43,6 +52,7 @@ mod elo_rating;
 mod matchmaking;
 mod ship_abilities;
 mod referral_system;
+/// Rate-limited resource minting and the player balance ledger.
 pub mod resource_minter;
 mod session_manager;
 mod ship_nft;
@@ -66,13 +76,17 @@ pub mod emergency_controls;
 pub mod event_framework;
 #[cfg(test)]
 mod event_gas_tests;
+/// Shared on-chain event emission helpers and severity levels.
 pub mod events;
 mod health_monitor;
 mod metadata_resolver;
+/// Procedural nebula layout generation with TTL-based lifecycle management.
 pub mod nebula_gen;
 mod randomness_oracle;
+/// Per-address rate limiting for sensitive contract operations.
 pub mod rate_limiter;
 pub mod ship_repair;
+/// Ship module upgrade costs and application of upgrade purchases.
 pub mod ship_upgrade;
 #[cfg(any(test, feature = "fuzz"))]
 pub mod test_helpers;
@@ -80,6 +94,7 @@ mod treasure_vault;
 // Issue #293: staking is exercised by `tests/economy/test_staking.rs`.
 pub mod staking;
 
+/// DAO proposal creation, voting, and execution flows.
 pub mod governance;
 mod indexer_callbacks;
 mod theme_customizer;
@@ -118,10 +133,12 @@ mod audio_seed_generator;
 pub mod clan_wars;
 mod constellation_mapper;
 mod entanglement_comms;
+/// Scheduled in-game event registration and lifecycle management.
 pub mod event_scheduler;
 mod market_oracle;
 mod navigation_planner;
 mod portal_registry;
+/// Commitment-based privacy-preserving player statistics.
 pub mod privacy_stats;
 mod prize_distributor;
 mod wormhole_traveler;
@@ -129,23 +146,31 @@ mod wormhole_traveler;
 mod battle_pass;
 mod nft_marketplace;
 mod rewards;
+/// Seasonal content windows, leaderboards, and reward tracks.
 pub mod seasons;
 pub mod trading;
 
 pub mod crafting;
+/// Crafting recipe registry and recipe validation.
 pub mod recipes;
 mod ship_customization;
 mod skins;
+/// Player notification dispatch: threshold alerts and push delivery.
 pub mod notifications {
+    /// Threshold checks that raise player notifications (low resources, etc.).
     pub mod alerts;
+    /// Notification records and delivery emission to player inboxes.
     pub mod push_service;
 }
 
+/// Compact aggregated state views served to mobile clients.
 pub mod mobile_views;
 
+/// Adapters for external Stellar services (Horizon, Stellar.expert).
 #[path = "../integrations/mod.rs"]
 pub mod integrations;
 
+/// Economic modeling: pricing, sinks, progression curves, anti-whale guards.
 pub mod economics;
 
 // Gas optimization modules
@@ -155,6 +180,7 @@ mod gas_optimized_storage;
 // Cross-contract safety: reentrancy guard + composable call helpers.
 mod ai_mission_engine;
 mod composability_examples;
+/// Cooperative guild quest tracking and reward distribution.
 pub mod guild_quests;
 mod input_validation;
 mod nomad_bonding;
@@ -4295,6 +4321,7 @@ impl NebulaNomadContract {
 pub mod weather_system;
 pub mod challenge_system;
 pub mod skin_marketplace;
+/// On-chain mini-games (poker, racing) with their own session state.
 pub mod mini_games {
     pub mod poker;
     pub mod racing;
