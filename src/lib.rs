@@ -189,8 +189,7 @@ pub use leaderboards::{
     PERIOD_WEEKLY,
 };
 pub use nebula_gen::{
-    Anomaly, AnomalyType, NebulaError as NebulaGenError, NebulaLayout as NebulaGenLayout,
-    ResourceClass,
+    Anomaly, AnomalyType, NebulaError as NebulaGenError, NebulaGenLayout, ResourceClass,
 };
 pub use onboarding_tutorial::{
     OnboardingError, PlayerProfile as OnboardingPlayerProfile, TutorialProgress, STEP_REWARDS,
@@ -4174,11 +4173,9 @@ impl NebulaNomadContract {
 }
 
 // Game Systems Modules (Issues #528-531)
-// `seasons`, `event_scheduler`, `alliance_manager`, `privacy_stats`, `crafting`
-// and `recipes` are already declared above with their original visibility; only
-// `clan_wars` is introduced here. Re-declaring them here shadowed the originals
-// and broke the crate (E0428).
-pub mod clan_wars;
+// `seasons`, `event_scheduler`, `alliance_manager`, `privacy_stats`, `crafting`,
+// `recipes` and `clan_wars` are all declared above with their original
+// visibility. Re-declaring any of them here breaks the crate (E0428, #572).
 
 // Game Systems Modules (Issues #550-553)
 pub mod weather_system;

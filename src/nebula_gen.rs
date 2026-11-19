@@ -130,7 +130,7 @@ pub struct Anomaly {
 
 #[contracttype]
 #[derive(Clone, Debug, PartialEq)]
-pub struct NebulaLayout {
+pub struct NebulaGenLayout {
     pub ship_id: u64,
     pub region_id: u64,
     pub layout_hash: BytesN<32>,
@@ -339,7 +339,7 @@ impl NebulaGen {
     /// - `seed` - 32-byte generation seed (must not be all-zero)
     ///
     /// # Returns
-    /// Complete `NebulaLayout` with positioned anomalies, hash, size, and timestamp on success.
+    /// Complete `NebulaGenLayout` with positioned anomalies, hash, size, and timestamp on success.
     ///
     /// # Errors
     /// - `NebulaError::NotInitialized` - Contract not yet initialized
@@ -370,7 +370,7 @@ impl NebulaGen {
         ship_id: u64,
         region_id: u64,
         seed: BytesN<32>,
-    ) -> Result<NebulaLayout, NebulaError> {
+    ) -> Result<NebulaGenLayout, NebulaError> {
         let config = Self::require_config(&env)?;
 
         // ── Require caller authentication ─────────────────────
@@ -413,7 +413,7 @@ impl NebulaGen {
         // ── Build layout hash ─────────────────────────────────
         let layout_hash = build_layout_hash(&env, master);
 
-        let layout = NebulaLayout {
+        let layout = NebulaGenLayout {
             ship_id,
             region_id,
             layout_hash: layout_hash.clone(),
@@ -486,8 +486,8 @@ impl NebulaGen {
     /// - `ship_id` - Target ship identifier
     ///
     /// # Returns
-    /// Complete `NebulaLayout` if active, or `None` if absent or expired.
-    pub fn get_layout(env: Env, ship_id: u64) -> Option<NebulaLayout> {
+    /// Complete `NebulaGenLayout` if active, or `None` if absent or expired.
+    pub fn get_layout(env: Env, ship_id: u64) -> Option<NebulaGenLayout> {
         Self::get_live_layout(&env, ship_id)
     }
 
@@ -558,7 +558,7 @@ impl NebulaGen {
         config.admin.require_auth();
         let key = DataKey::ActiveLayout(ship_id);
         let store = env.storage().persistent();
-        if let Some(layout) = store.get::<_, NebulaLayout>(&key) {
+        if let Some(layout) = store.get::<_, NebulaGenLayout>(&key) {
             if is_expired(
                 env.ledger().timestamp(),
                 layout.generated_at,
@@ -600,10 +600,10 @@ impl NebulaGen {
     ///
     /// The config is read only when a layout exists, and the storage key is
     /// built once for both the read and the removal.
-    fn get_live_layout(env: &Env, ship_id: u64) -> Option<NebulaLayout> {
+    fn get_live_layout(env: &Env, ship_id: u64) -> Option<NebulaGenLayout> {
         let key = DataKey::ActiveLayout(ship_id);
         let store = env.storage().persistent();
-        let layout: NebulaLayout = store.get(&key)?;
+        let layout: NebulaGenLayout = store.get(&key)?;
 
         let ttl = env
             .storage()
@@ -627,7 +627,7 @@ impl NebulaGen {
     fn remove_if_expired(env: &Env, config: &NebulaConfig, now: u64, ship_id: u64) -> bool {
         let key = DataKey::ActiveLayout(ship_id);
         let store = env.storage().persistent();
-        match store.get::<DataKey, NebulaLayout>(&key) {
+        match store.get::<DataKey, NebulaGenLayout>(&key) {
             Some(l) if is_expired(now, l.generated_at, config.layout_ttl) => {
                 store.remove(&key);
                 env.events().publish(

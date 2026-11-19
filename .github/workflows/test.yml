@@ -9,11 +9,16 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+    # Report stable and nightly independently: with the default fail-fast, a
+    # nightly failure cancelled the stable job mid-run (#572), hiding whether
+    # stable itself was green.
     strategy:
+      fail-fast: false
       matrix:
         rust: [stable, nightly]
+    timeout-minutes: 60
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@master

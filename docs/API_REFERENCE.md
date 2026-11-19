@@ -9,7 +9,7 @@ Handles nebula layout generation, anomaly tracking, and TTL management for space
 ### Key Types
 
 - `NebulaError` - Error codes for nebula operations
-- `NebulaLayout` - Generated nebula layout with anomalies and metadata
+- `NebulaGenLayout` - Generated nebula layout with anomalies and metadata
 - `Anomaly` - Individual anomaly in a nebula (position, type, rarity)
 - `ResourceClass` - Resource scarcity level: Sparse, Moderate, Abundant
 - `AnomalyType` - Type of anomaly: DustCloud, IonStorm, CrystalFormation, PlasmaVent, DarkMatterPocket
@@ -26,7 +26,7 @@ Initialize the nebula generation contract with configuration parameters.
 
 Returns error if already initialized or parameters are invalid.
 
-#### generate_validated_nebula_layout(env: Env, ship_id: u64, region_id: u64, seed: BytesN<32>) -> Result<NebulaLayout, NebulaError>
+#### generate_validated_nebula_layout(env: Env, ship_id: u64, region_id: u64, seed: BytesN<32>) -> Result<NebulaGenLayout, NebulaError>
 
 Generate a new nebula layout for a ship in a region.
 
@@ -34,7 +34,7 @@ Generate a new nebula layout for a ship in a region.
 - `region_id` - Galactic region (must be 1..=MAX_REGION_ID)
 - `seed` - 32-byte generation seed (must not be degenerate)
 
-Returns complete NebulaLayout with positioned anomalies and hash, or validation/storage error.
+Returns complete NebulaGenLayout with positioned anomalies and hash, or validation/storage error.
 
 #### query_anomaly(env: Env, ship_id: u64, anomaly_index: u32) -> Result<Anomaly, NebulaError>
 
@@ -49,7 +49,7 @@ Returns Anomaly if layout exists and index is in bounds.
 
 Check if an anomaly exists without fetching the full structure.
 
-#### get_layout(env: Env, ship_id: u64) -> Option<NebulaLayout>
+#### get_layout(env: Env, ship_id: u64) -> Option<NebulaGenLayout>
 
 Fetch complete layout for a ship, if it exists and is not expired.
 
