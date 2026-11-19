@@ -7,6 +7,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Breaking (#573):** the anomaly-based layout in `nebula_gen` is renamed
+  `NebulaLayout` → `NebulaGenLayout`. Two `#[contracttype]` structs named
+  `NebulaLayout` (one in `nebula_explorer`, one in `nebula_gen`) produced a
+  conflicting contract spec. `nebula_explorer::NebulaLayout` (the 16×16 cell
+  grid returned by `generate_nebula_layout` / `scan_nebula`) is now the only
+  `NebulaLayout`. Migration: replace `nebula_gen::NebulaLayout` with
+  `nebula_gen::NebulaGenLayout` (or the crate-root `NebulaGenLayout`, which was
+  already its re-export name). Stored data is unaffected: Soroban encodes struct
+  values by field name, not type name.
+
+### Fixed
+
+- `cargo test` builds again (#572): the duplicate `pub mod clan_wars;` in
+  `lib.rs` (E0428) is removed, and the disabled
+  `marketplace_listing_still_emits_once` gas test, which called the removed
+  `nft_marketplace::list_ship`, is excluded from compilation until it is ported
+  to `create_listing`. The Test & Build matrix no longer cancels stable when
+  nightly fails (`fail-fast: false`).
+- Harvest migration (#574) is complete: `harvest_resources`, `auto_list_on_dex`
+  and the `HarvestError` / `HarvestResult` / `DexOffer` / `HarvestedResource`
+  types are implemented in `resource_minter`, `dex_integration::harvest_and_list`
+  builds on them, and every import across the crate resolves. Callers that
+  only need to credit resources should use `mint_resource`.
+- `CacheEntry.value` is a Soroban `Bytes` (#575), not `Vec<u8>`, so it is a
+  valid `#[contracttype]` field.
+
 Economy rebalance: a compounding ship-upgrade curve, two new resource sinks, and
 an oracle-driven dynamic pricing engine for the DEX.
 

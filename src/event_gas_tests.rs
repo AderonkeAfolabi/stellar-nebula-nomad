@@ -210,6 +210,10 @@ fn expired_layout_read_emits_nothing() {
 /// Control: a state-changing flow keeps emitting, and the belt-and-braces
 /// changes must not have made it any more expensive than baseline 50105.
 // // #[test]
+// `nft_marketplace::list_ship` no longer exists (listings go through
+// `create_listing`), so this disabled test is excluded from compilation until
+// it is ported; otherwise `cargo test` fails to build (#572).
+#[cfg(any())]
 fn marketplace_listing_still_emits_once() {
     let (env, contract) = setup();
     let seller = Address::generate(&env);

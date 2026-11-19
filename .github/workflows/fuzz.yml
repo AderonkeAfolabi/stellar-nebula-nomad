@@ -15,7 +15,14 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        target: [fuzz_nebula_layout, fuzz_ship_mint]
+        target:
+          - fuzz_nebula_layout
+          - fuzz_ship_mint
+          # Extended targets added in issue #604
+          - fuzz_trading
+          - fuzz_yield
+          - fuzz_navigation
+          - fuzz_comprehensive
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@nightly

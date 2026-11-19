@@ -43,6 +43,9 @@ mod onboarding_tutorial;
 mod player_profile;
 mod player_segmentation;
 mod pvp_combat;
+mod elo_rating;
+mod matchmaking;
+mod ship_abilities;
 mod referral_system;
 pub mod resource_minter;
 mod session_manager;
@@ -178,6 +181,11 @@ pub use content_tools::{
     DEFAULT_CREATOR_SHARE_BPS, DEFAULT_PLATFORM_SHARE_BPS, MAX_CONTENT_PER_CREATOR,
     MAX_CONTENT_PRICE, MAX_MARKETPLACE_LISTINGS,
 };
+// `LeaderboardEntry` names three types in this crate. The crate root exports
+// `leaderboards::LeaderboardEntry` (player score rankings). The analytics
+// snapshot type is `analytics::LeaderboardEntry`, and the referral type is
+// `rewards::LeaderboardEntry`. Both are reached by module path and are not
+// re-exported here. See the doc comment on `leaderboards::LeaderboardEntry`.
 pub use leaderboards::{
     AchievementEntry, GuildEntry, LeaderboardEntry, LeaderboardEntry as EnhancedLeaderboardEntry,
     LeaderboardError, LeaderboardRewards, PageMeta, RegionalEntry, CATEGORY_ACHIEVEMENTS,
@@ -188,8 +196,7 @@ pub use leaderboards::{
     PERIOD_WEEKLY,
 };
 pub use nebula_gen::{
-    Anomaly, AnomalyType, NebulaError as NebulaGenError, NebulaLayout as NebulaGenLayout,
-    ResourceClass,
+    Anomaly, AnomalyType, NebulaError as NebulaGenError, NebulaGenLayout, ResourceClass,
 };
 pub use onboarding_tutorial::{
     OnboardingError, PlayerProfile as OnboardingPlayerProfile, TutorialProgress, STEP_REWARDS,
@@ -206,6 +213,28 @@ pub use pvp_combat::{
     MatchmakingEntry, PvPError, RewardsConfig, SpectatorInfo, COMBAT_TIMEOUT,
     ELO_DECAY_BASE_POINTS, ELO_DECAY_FLOOR, ELO_DECAY_INACTIVITY_SECS, INITIAL_ELO, K_FACTOR,
     MAX_ENERGY, MAX_HP, MAX_QUEUE_SIZE, MAX_SPECTATORS,
+};
+// Issue #590 — ELO rating system with 8 tiers, K-factor, seasonal adjustments.
+pub use elo_rating::{
+    advance_season, apply_match_result, apply_seasonal_reset, calculate_updated_ratings,
+    check_demotion, check_promotion, get_games_played, get_rating_entry, get_season_config,
+    increment_games_played, k_factor_for, tier_for_rating, tier_symbol, EloKey, RankTier,
+    RatingEntry, SeasonConfig, DEMOTION_BUFFER, K_FACTOR_HIGH, K_FACTOR_MID, K_FACTOR_NEW,
+    SEASONAL_DECAY_BPS, SEASONAL_FLOOR,
+    TIER_BRONZE_MIN, TIER_CHALLENGER_MIN, TIER_DIAMOND_MIN, TIER_GOLD_MIN,
+    TIER_GRANDMASTER_MIN, TIER_MASTER_MIN, TIER_PLATINUM_MIN, TIER_SILVER_MIN,
+};
+// Issue #591 — MMR-based matchmaking with expanding range and abuse prevention.
+pub use matchmaking::{
+    dequeue, enqueue, get_queue_status, is_queued, process_queue, queue_size, GameMode,
+    MatchResult, MatchmakingKey, QueueEntry, EXPAND_INTERVAL_SECS, MAX_QUEUE_WAIT_SECS,
+    MAX_TEAM_SIZE, MMR_EXPAND_STEP, MMR_INITIAL_RANGE, REQUEUE_COOLDOWN_SECS,
+};
+// Issue #589 — Ship ability system with 5 abilities per ship type.
+pub use ship_abilities::{
+    get_abilities_for_type, get_ability_states, init_combat_abilities, is_ability_ready,
+    tick_cooldowns, use_ability, Ability, AbilityEffect, AbilityKey, AbilityState,
+    ShipAbilityLoadout, ABILITY_MAX_ENERGY, MAX_ABILITIES_PER_SHIP,
 };
 pub use referral_system::{Referral, ReferralError};
 pub use resource_minter::{
@@ -337,8 +366,8 @@ pub use audio_seed_generator::{
 };
 pub use constellation_mapper::{
     get_constellation, get_constellation_count, match_constellation, match_constellations_batch,
-    record_constellation, Constellation, ConstellationError, MatchResult, MAX_MATCH_BURST,
-    MIN_STARS,
+    record_constellation, Constellation, ConstellationError, MatchResult as ConstellationMatchResult,
+    MAX_MATCH_BURST, MIN_STARS,
 };
 pub use entanglement_comms::{
     create_entanglement_pair, dissolve_pair, get_entanglement_pair, get_message_count,
@@ -1065,6 +1094,95 @@ impl NebulaNomadContract {
     /// Set PvP combat admin (admin only).
     pub fn set_pvp_admin(env: Env, admin: Address) {
         let _ = pvp_combat::set_admin(&env, &admin);
+    }
+
+    // ─── MMR Matchmaking — Issue #591 ─────────────────────────────────────
+
+    /// Enqueue a player for MMR-based matchmaking in the given mode.
+    pub fn mm_enqueue(env: Env, player: Address, mode: GameMode) -> Result<(), PvPError> {
+        matchmaking::enqueue(&env, &player, mode)
+    }
+
+    /// Remove a player from the matchmaking queue.
+    pub fn mm_dequeue(env: Env, player: Address, mode: GameMode) -> Result<(), PvPError> {
+        matchmaking::dequeue(&env, &player, mode)
+    }
+
+    /// Process the matchmaking queue for a game mode — returns matched pair
+    /// or None. Prunes timed-out entries automatically.
+    pub fn mm_process(env: Env, mode: GameMode) -> Result<Option<MatchResult>, PvPError> {
+        matchmaking::process_queue(&env, mode)
+    }
+
+    /// Get current queue depth for a game mode.
+    pub fn mm_queue_size(env: Env, mode: GameMode) -> u32 {
+        matchmaking::queue_size(&env, mode)
+    }
+
+    /// Check if a player is currently in queue for a mode.
+    pub fn mm_is_queued(env: Env, player: Address, mode: GameMode) -> bool {
+        matchmaking::is_queued(&env, &player, mode)
+    }
+
+    /// Get a player's current queue entry (position + wait info).
+    pub fn mm_get_status(env: Env, player: Address, mode: GameMode) -> Option<QueueEntry> {
+        matchmaking::get_queue_status(&env, &player, mode)
+    }
+
+    // ─── ELO Rating Tiers — Issue #590 ───────────────────────────────────
+
+    /// Get the full rating entry (tier, games played, season) for a player.
+    pub fn get_rating_entry(env: Env, player: Address) -> RatingEntry {
+        elo_rating::get_rating_entry(&env, &player)
+    }
+
+    /// Apply a match result: update ELO ratings with dynamic K-factor and
+    /// emit tier promotion/demotion events.
+    pub fn apply_match_result(env: Env, winner: Address, loser: Address) {
+        elo_rating::apply_match_result(&env, &winner, &loser)
+    }
+
+    /// Apply seasonal soft-reset to a batch of players.
+    pub fn apply_seasonal_reset(env: Env, players: Vec<Address>) {
+        elo_rating::apply_seasonal_reset(&env, players)
+    }
+
+    /// Advance the season counter.
+    pub fn advance_season(env: Env) -> u32 {
+        elo_rating::advance_season(&env)
+    }
+
+    // ─── Ship Abilities — Issue #589 ──────────────────────────────────────
+
+    /// Get the 5 abilities available for a ship type.
+    pub fn get_ship_abilities(env: Env, ship_type: Symbol) -> Vec<Ability> {
+        ship_abilities::get_abilities_for_type(&env, &ship_type)
+    }
+
+    /// Initialise ability states for a player entering combat.
+    pub fn init_combat_abilities(env: Env, combat_id: u64, player: Address, ship_type: Symbol) {
+        ship_abilities::init_combat_abilities(&env, combat_id, &player, &ship_type)
+    }
+
+    /// Use a ship ability during combat.
+    pub fn use_ability(
+        env: Env,
+        combat_id: u64,
+        player: Address,
+        ship_type: Symbol,
+        ability_id: Symbol,
+    ) -> Result<(), PvPError> {
+        ship_abilities::use_ability(&env, combat_id, &player, &ship_type, &ability_id)
+    }
+
+    /// Get current cooldown states for a player's abilities in a combat.
+    pub fn get_ability_states(env: Env, combat_id: u64, player: Address) -> Vec<AbilityState> {
+        ship_abilities::get_ability_states(&env, combat_id, &player)
+    }
+
+    /// Tick all ability cooldowns down by 1 (call at start of player's turn).
+    pub fn tick_ability_cooldowns(env: Env, combat_id: u64, player: Address) {
+        ship_abilities::tick_cooldowns(&env, combat_id, &player)
     }
 
     // === Contract Versioning API ===
@@ -2642,7 +2760,7 @@ impl NebulaNomadContract {
     pub fn match_constellation(
         env: Env,
         observed: Vec<BytesN<32>>,
-    ) -> Result<MatchResult, ConstellationError> {
+    ) -> Result<ConstellationMatchResult, ConstellationError> {
         constellation_mapper::match_constellation(&env, &observed)
     }
 
@@ -4172,8 +4290,10 @@ impl NebulaNomadContract {
     }
 }
 
-// Game Systems Modules (Issues #528-531) are declared above with their
-// original visibility; re-declaring them here shadowed the originals (E0428).
+// Game Systems Modules (Issues #528-531)
+// `seasons`, `event_scheduler`, `alliance_manager`, `privacy_stats`, `crafting`,
+// `recipes` and `clan_wars` are all declared above with their original
+// visibility. Re-declaring any of them here breaks the crate (E0428, #572).
 
 // Game Systems Modules (Issues #550-553)
 pub mod weather_system;

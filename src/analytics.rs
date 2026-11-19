@@ -49,6 +49,9 @@ pub struct GlobalStats {
 }
 
 /// One entry in a leaderboard snapshot, sorted descending by cosmic_essence.
+///
+/// Not the crate-root `LeaderboardEntry`, which is `leaderboards::LeaderboardEntry`.
+/// This type is separate on-chain and has different fields.
 #[contracttype]
 #[derive(Clone, Debug)]
 pub struct LeaderboardEntry {
