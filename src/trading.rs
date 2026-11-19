@@ -78,6 +78,8 @@ pub struct TradeRecord {
 #[contracterror]
 #[derive(Copy, Clone, Debug, PartialEq)]
 pub enum TradingError {
+    /// Caller exceeded the rate limit for this operation (Issue #610).
+    RateLimitExceeded = 9,
     InvalidOrder = 1,
     OrderNotFound = 2,
     NotOrderOwner = 3,
@@ -101,7 +103,7 @@ impl crate::error_standard::StandardContractError for TradingError {
             Self::NotOrderOwner => (ErrorKind::Authorization, false),
             Self::OrderCapReached => (ErrorKind::ResourceLimit, false),
             Self::Reentrancy => (ErrorKind::Conflict, false),
-            Self::DailyTradeCapExceeded => (ErrorKind::ResourceLimit, true),
+            Self::DailyTradeCapExceeded | Self::RateLimitExceeded => (ErrorKind::ResourceLimit, true),
         };
         crate::error_standard::ErrorDescriptor {
             module: "trading",
@@ -159,6 +161,7 @@ fn place_limit_order_unguarded(
     mut order: LimitOrder,
 ) -> Result<u64, TradingError> {
     trader.require_auth();
+    crate::rate_limiter::check_rate_limit(env, trader, crate::rate_limiter::Operation::Trading)?;
     anti_whale::check_operation(env, trader, anti_whale::OpKind::Trade, 1)
         .map_err(|_| TradingError::DailyTradeCapExceeded)?;
 
@@ -419,6 +422,8 @@ pub enum AmmKey {
 #[derive(Clone, Copy, Debug, PartialEq)]
 #[repr(u32)]
 pub enum AmmError {
+    /// Caller exceeded the rate limit for this operation (Issue #610).
+    RateLimitExceeded = 110,
     PoolNotFound = 100,
     PoolAlreadyExists = 101,
     InsufficientLiquidity = 102,
@@ -445,7 +450,7 @@ impl crate::error_standard::StandardContractError for AmmError {
             Self::InvalidAmount | Self::InvalidRoute | Self::ZeroLiquidity => {
                 (ErrorKind::Validation, false)
             }
-            Self::DailyTradeCapExceeded => (ErrorKind::ResourceLimit, true),
+            Self::DailyTradeCapExceeded | Self::RateLimitExceeded => (ErrorKind::ResourceLimit, true),
         };
         crate::error_standard::ErrorDescriptor {
             module: "trading",
@@ -555,6 +560,7 @@ pub fn create_pool(
     resource_b: Symbol,
 ) -> Result<u64, AmmError> {
     creator.require_auth();
+    crate::rate_limiter::check_rate_limit(env, creator, crate::rate_limiter::Operation::Trading)?;
 
     if resource_a == resource_b {
         return Err(AmmError::InvalidAmount);
@@ -641,6 +647,7 @@ fn add_liquidity_unguarded(
     amount_b: i128,
 ) -> Result<(i128, LiquidityPool), AmmError> {
     provider.require_auth();
+    crate::rate_limiter::check_rate_limit(env, provider, crate::rate_limiter::Operation::Trading)?;
 
     if amount_a <= 0 || amount_b <= 0 {
         return Err(AmmError::InvalidAmount);
@@ -804,6 +811,7 @@ pub fn swap_exact_input(
     route: Vec<u64>,
 ) -> Result<i128, AmmError> {
     trader.require_auth();
+    crate::rate_limiter::check_rate_limit(env, trader, crate::rate_limiter::Operation::Trading)?;
 
     if amount_in <= 0 {
         return Err(AmmError::InvalidAmount);
@@ -989,6 +997,18 @@ pub fn quote_swap(
 }
 
 // ── Tests (Issue #238: reentrancy safety) ───────────────────────────────────
+
+impl From<crate::rate_limiter::RateLimitError> for TradingError {
+    fn from(_: crate::rate_limiter::RateLimitError) -> Self {
+        TradingError::RateLimitExceeded
+    }
+}
+
+impl From<crate::rate_limiter::RateLimitError> for AmmError {
+    fn from(_: crate::rate_limiter::RateLimitError) -> Self {
+        AmmError::RateLimitExceeded
+    }
+}
 
 #[cfg(test)]
 mod tests {

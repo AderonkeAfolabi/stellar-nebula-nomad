@@ -22,6 +22,8 @@ use crate::resource_minter::{self, ResourceType};
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[repr(u32)]
 pub enum TournamentError {
+    /// Caller exceeded the rate limit for this operation (Issue #610).
+    RateLimitExceeded = 16,
     /// `max_players` must be a power of two in [4, 64].
     InvalidPlayerCount = 1,
     /// Prize distribution basis points don't sum to <= 10_000, or the list
@@ -245,6 +247,7 @@ pub fn register_for_tournament(
     tournament_id: u64,
 ) -> Result<u32, TournamentError> {
     player.require_auth();
+    crate::rate_limiter::check_rate_limit(env, player, crate::rate_limiter::Operation::TournamentRegistration)?;
 
     let mut tournament = get_tournament(env, tournament_id)?;
     if tournament.status != symbol_short!("reg") {
@@ -624,6 +627,12 @@ fn placements_best_first(env: &Env, tournament: &Tournament) -> Vec<Address> {
     }
 
     placements
+}
+
+impl From<crate::rate_limiter::RateLimitError> for TournamentError {
+    fn from(_: crate::rate_limiter::RateLimitError) -> Self {
+        TournamentError::RateLimitExceeded
+    }
 }
 
 #[cfg(test)]

@@ -151,6 +151,7 @@ pub mod seasons;
 pub mod trading;
 
 pub mod crafting;
+pub mod tournament;
 /// Crafting recipe registry and recipe validation.
 pub mod recipes;
 mod ship_customization;

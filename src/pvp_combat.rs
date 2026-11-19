@@ -6,6 +6,8 @@ use soroban_sdk::{contracterror, contracttype, symbol_short, Address, Env, Symbo
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[repr(u32)]
 pub enum PvPError {
+    /// Caller exceeded the rate limit for this operation (Issue #610).
+    RateLimitExceeded = 14,
     /// Player not found.
     PlayerNotFound = 1,
     /// Challenge already exists.
@@ -45,6 +47,7 @@ impl crate::error_standard::StandardContractError for PvPError {
             | Self::AlreadyInCombat
             | Self::NotInQueue
             | Self::AlreadyInitialized => (ErrorKind::Conflict, false),
+            Self::RateLimitExceeded => (ErrorKind::ResourceLimit, true),
             Self::Unauthorized => (ErrorKind::Authorization, false),
             Self::InvalidCombatParams | Self::InvalidMove => (ErrorKind::Validation, false),
             Self::EloUpdateFailed => (ErrorKind::Internal, false),
@@ -458,6 +461,7 @@ pub fn create_challenge(
     stake: i128,
 ) -> Result<u64, PvPError> {
     challenger.require_auth();
+    crate::rate_limiter::check_rate_limit(env, challenger, crate::rate_limiter::Operation::CombatInitiation)?;
 
     // Check if opponent exists (has stats)
     let _ = get_or_init_stats(env, opponent);
@@ -501,6 +505,7 @@ pub fn create_challenge(
 
 pub fn accept_challenge(env: &Env, caller: &Address, challenge_id: u64) -> Result<u64, PvPError> {
     caller.require_auth();
+    crate::rate_limiter::check_rate_limit(env, caller, crate::rate_limiter::Operation::CombatInitiation)?;
 
     let key = PvPDataKey::PvpChallenge(challenge_id);
     let mut challenge: Challenge = env
@@ -884,6 +889,7 @@ pub fn join_matchmaking(
     preferred_stake: i128,
 ) -> Result<(), PvPError> {
     player.require_auth();
+    crate::rate_limiter::check_rate_limit(env, player, crate::rate_limiter::Operation::CombatInitiation)?;
 
     // Track last active
     update_last_active(env, player);
@@ -1126,6 +1132,12 @@ pub fn get_rewards_config(env: &Env) -> RewardsConfig {
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
+
+impl From<crate::rate_limiter::RateLimitError> for PvPError {
+    fn from(_: crate::rate_limiter::RateLimitError) -> Self {
+        PvPError::RateLimitExceeded
+    }
+}
 
 #[cfg(test)]
 mod tests {

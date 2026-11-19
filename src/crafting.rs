@@ -9,6 +9,8 @@ use soroban_sdk::{contracterror, symbol_short, Address, Env, Symbol, Vec};
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[repr(u32)]
 pub enum CraftingError {
+    /// Caller exceeded the rate limit for this operation (Issue #610).
+    RateLimitExceeded = 10,
     RecipeLocked = 1,
     InsufficientLevel = 2,
     InsufficientResources = 3,
@@ -35,6 +37,7 @@ impl crate::error_standard::StandardContractError for CraftingError {
             Self::InsufficientLevel
             | Self::InsufficientResources
             | Self::InsufficientSkillPoints => (ErrorKind::ResourceLimit, false),
+            Self::RateLimitExceeded => (ErrorKind::ResourceLimit, true),
             Self::RecipeNotFound | Self::NodeNotFound => (ErrorKind::NotFound, false),
             Self::WrongSpecialization => (ErrorKind::Validation, false),
         };
@@ -106,6 +109,7 @@ use crate::ensure_auth;
 /// output is minted.
 pub fn craft(env: Env, player: Address, recipe_id: u32) -> Result<(), CraftingError> {
     ensure_auth!(player);
+    crate::rate_limiter::check_rate_limit(&env, &player, crate::rate_limiter::Operation::Crafting)?;
     craft_inner(&env, &player, recipe_id, false)
 }
 
@@ -122,6 +126,7 @@ pub fn craft_with_overcharge(
     recipe_id: u32,
 ) -> Result<(), CraftingError> {
     ensure_auth!(player);
+    crate::rate_limiter::check_rate_limit(&env, &player, crate::rate_limiter::Operation::Crafting)?;
     craft_inner(&env, &player, recipe_id, true)
 }
 
@@ -449,6 +454,12 @@ fn get_resource_balance(env: &Env, player: &Address, symbol: Symbol) -> u32 {
 fn set_resource_balance(env: &Env, player: &Address, symbol: Symbol, amount: u32) {
     let key = (symbol_short!("res_bal"), player.clone(), symbol);
     env.storage().instance().set(&key, &amount);
+}
+
+impl From<crate::rate_limiter::RateLimitError> for CraftingError {
+    fn from(_: crate::rate_limiter::RateLimitError) -> Self {
+        CraftingError::RateLimitExceeded
+    }
 }
 
 #[cfg(test)]

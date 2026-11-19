@@ -424,3 +424,7 @@ inherits = "release"
 [[test]]
 name = "security_storage_keys"
 path = "tests/security/storage_key_collisions.rs"
+
+[[test]]
+name = "security_rate_limiting"
+path = "tests/security/rate_limiting_tests.rs"
