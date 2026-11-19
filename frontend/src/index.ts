@@ -5,3 +5,4 @@ export * from './services/websocket';
 export * from './utils/offline';
 export * from './contexts/WebSocketContext';
 export * from './views/AnalyticsDashboard';
+export * from './views/Housing';

@@ -9,8 +9,11 @@
 //! - **Housing Instances**: Each player has a unique personal space
 //! - **Size Tiers**: Small → Medium → Large with upgrade paths
 //! - **Customization**: Walls, floors, lighting, furniture placement
-//! - **Achievement Display**: Show off earned badges and accomplishments
-//! - **Functional Items**: Crafting stations, storage expansion
+//! - **Furniture System**: Define, purchase, place, rotate and remove items
+//! - **Achievement Display Cases**: Show off earned badges and accomplishments
+//! - **Guild Banners**: Display your guild affiliation and motto
+//! - **Storage Expansion**: Upgradeable capacity that grants extra furniture slots
+//! - **Functional Items**: Crafting stations and other bonus-granting furniture
 //! - **Visiting System**: Public/private/friends-only access control
 //! - **Rating System**: Players can rate visited houses (1-5 stars)
 //! - **Discovery**: Browse trending and popular houses
@@ -24,6 +27,9 @@
 //! HousingKey::Rating(owner)      → HouseRating
 //! HousingKey::Visitors(owner)    → Vec<VisitorRecord>
 //! HousingKey::Discovery(tier)    → Vec<Address> (featured houses)
+//! HousingKey::AchievementDisplay(owner) → Vec<AchievementDisplay>
+//! HousingKey::GuildBanner(owner) → GuildBanner
+//! HousingKey::Storage(owner)     → HouseStorage
 //! ```
 
 use soroban_sdk::{contracterror, contracttype, symbol_short, Address, Env, String, Symbol, Vec};
@@ -46,8 +52,26 @@ pub const MAX_FEATURED_HOUSES: u32 = 20;
 /// Maximum furniture categories.
 pub const MAX_FURNITURE_CATEGORIES: u32 = 10;
 
+/// Maximum achievement display cases a house can hold.
+pub const MAX_ACHIEVEMENT_DISPLAYS: u32 = 24;
+
+/// Maximum storage expansion level.
+pub const MAX_STORAGE_LEVEL: u32 = 5;
+
+/// Base item capacity before any storage upgrades.
+pub const BASE_STORAGE_CAPACITY: u32 = 100;
+
+/// Extra item slots granted per storage expansion level.
+pub const STORAGE_CAPACITY_PER_LEVEL: u32 = 100;
+
+/// Cost of the first storage expansion (quadratic scaling thereafter).
+pub const STORAGE_BASE_COST: u64 = 2_000;
+
 /// Auto-increment counter for furniture IDs.
 const FURNITURE_COUNTER: Symbol = symbol_short!("fnc");
+
+/// Auto-increment counter for achievement display IDs.
+const DISPLAY_COUNTER: Symbol = symbol_short!("dsp");
 
 // ─── Storage Keys ─────────────────────────────────────────────────────────────
 
@@ -66,8 +90,16 @@ pub enum HousingKey {
     Visitors(Address),
     /// Featured houses for a discovery tier.
     Discovery(Symbol),
-    /// Furniture counter.
+    /// Achievement display cases for an owner.
+    AchievementDisplay(Address),
+    /// Guild banner displayed in an owner's house.
+    GuildBanner(Address),
+    /// Storage expansion record for an owner.
+    Storage(Address),
+    /// Global counter for furniture IDs.
     HousingCounter,
+    /// Global counter for achievement display IDs.
+    DisplayCounter,
 }
 
 // ─── Data Types ───────────────────────────────────────────────────────────────
@@ -198,6 +230,41 @@ pub struct VisitorRecord {
     pub left_rating: bool,
 }
 
+/// An unlocked achievement shown in a house display case.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct AchievementDisplay {
+    pub display_id: u64,
+    pub achievement_id: u64,
+    /// Display slot index (0-based, bounded by [`MAX_ACHIEVEMENT_DISPLAYS`]).
+    pub slot: u32,
+    pub installed_at: u64,
+}
+
+/// A guild banner displayed in a player's house.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct GuildBanner {
+    pub guild_name: String,
+    /// Short motto shown beneath the guild name.
+    pub motto: String,
+    pub installed_at: u64,
+}
+
+/// Storage expansion state for a house.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct HouseStorage {
+    pub owner: Address,
+    /// Number of completed expansions (0 = base capacity).
+    pub level: u32,
+    /// Capacity available before upgrades.
+    pub base_capacity: u32,
+    /// Additional capacity granted by upgrades.
+    pub bonus_capacity: u32,
+    pub last_expanded_at: u64,
+}
+
 // ─── Errors ───────────────────────────────────────────────────────────────────
 
 #[contracterror]
@@ -238,27 +305,48 @@ pub enum HousingError {
     InvalidAccess = 16,
     /// Furniture already placed at this position.
     PositionOccupied = 17,
+    /// Achievement has not been unlocked by the player.
+    AchievementNotUnlocked = 18,
+    /// All achievement display cases are in use.
+    DisplayLimitReached = 19,
+    /// Display case does not exist.
+    DisplayNotFound = 20,
+    /// Display slot is out of range.
+    InvalidSlot = 21,
+    /// Player does not belong to a guild.
+    NoGuildMembership = 22,
+    /// Storage expansion is already at the maximum level.
+    StorageMaxLevelReached = 23,
+    /// Achievement is already on display (or slot already taken).
+    AlreadyDisplayed = 24,
 }
 
 impl crate::error_standard::StandardContractError for HousingError {
     fn descriptor(self) -> crate::error_standard::ErrorDescriptor {
         use crate::error_standard::ErrorKind;
         let (kind, retryable) = match self {
-            Self::HouseNotFound | Self::FurnitureNotFound | Self::ProfileNotFound => {
-                (ErrorKind::NotFound, false)
-            }
-            Self::HouseAlreadyExists | Self::AlreadyRated | Self::CannotRateSelf => {
-                (ErrorKind::Conflict, false)
-            }
+            Self::HouseNotFound
+            | Self::FurnitureNotFound
+            | Self::ProfileNotFound
+            | Self::DisplayNotFound => (ErrorKind::NotFound, false),
+            Self::HouseAlreadyExists
+            | Self::AlreadyRated
+            | Self::CannotRateSelf
+            | Self::AlreadyDisplayed => (ErrorKind::Conflict, false),
             Self::InsufficientResources => (ErrorKind::ResourceLimit, true),
             Self::MaxSizeReached
             | Self::FurnitureLimitReached
             | Self::VisitorLimitReached
-            | Self::FeaturedLimitReached => (ErrorKind::ResourceLimit, false),
+            | Self::FeaturedLimitReached
+            | Self::DisplayLimitReached
+            | Self::StorageMaxLevelReached => (ErrorKind::ResourceLimit, false),
             Self::InvalidPlacement
             | Self::InvalidRating
             | Self::InvalidAccess
-            | Self::PositionOccupied => (ErrorKind::Validation, false),
+            | Self::InvalidSlot
+            | Self::PositionOccupied
+            | Self::AchievementNotUnlocked
+            | Self::NoGuildMembership => (ErrorKind::Validation, false),
             Self::AccessDenied => (ErrorKind::Authorization, false),
             Self::ArithmeticOverflow => (ErrorKind::Internal, false),
         };
@@ -331,6 +419,18 @@ pub fn initialize_house(env: &Env, owner: Address) -> Result<HouseInstance, Hous
             average_rating: 0,
             total_ratings: 0,
             ratings: Vec::new(env),
+        },
+    );
+
+    // Initialize storage expansion record at base capacity
+    env.storage().persistent().set(
+        &HousingKey::Storage(owner.clone()),
+        &HouseStorage {
+            owner: owner.clone(),
+            level: 0,
+            base_capacity: BASE_STORAGE_CAPACITY,
+            bonus_capacity: 0,
+            last_expanded_at: now,
         },
     );
 
@@ -560,11 +660,20 @@ pub fn place_furniture(
         return Err(HousingError::InvalidPlacement);
     }
 
+    // Storage expansions grant extra furniture slots on top of the size-tier
+    // allowance, capped by the global bound used to keep iteration bounded.
+    let storage_bonus = env
+        .storage()
+        .persistent()
+        .get::<HousingKey, HouseStorage>(&HousingKey::Storage(owner.clone()))
+        .map_or(0, |s| s.bonus_capacity);
     let max_furniture = match house.size {
         HouseSize::Small => 50u32,
         HouseSize::Medium => 100u32,
         HouseSize::Large => MAX_FURNITURE_PER_HOUSE,
-    };
+    }
+    .saturating_add(storage_bonus)
+    .min(MAX_FURNITURE_PER_HOUSE);
 
     if house.furniture_count >= max_furniture {
         return Err(HousingError::FurnitureLimitReached);
@@ -830,6 +939,303 @@ pub fn feature_house(
     );
 
     Ok(())
+}
+
+// ─── Achievement Display Cases ────────────────────────────────────────────────
+
+/// Update a house's `last_modified` timestamp after a customization change.
+fn touch_house(env: &Env, owner: &Address) -> Result<(), HousingError> {
+    let mut house: HouseInstance = env
+        .storage()
+        .persistent()
+        .get(&HousingKey::House(owner.clone()))
+        .ok_or(HousingError::HouseNotFound)?;
+    house.last_modified = env.ledger().timestamp();
+    env.storage()
+        .persistent()
+        .set(&HousingKey::House(owner.clone()), &house);
+    Ok(())
+}
+
+/// Install an unlocked achievement into a display case in the owner's house.
+///
+/// The achievement must already be unlocked by the player (verified through
+/// the achievements catalog). Each achievement and each slot may only be used
+/// once, and the number of cases is bounded by [`MAX_ACHIEVEMENT_DISPLAYS`].
+pub fn install_achievement_display(
+    env: &Env,
+    owner: Address,
+    achievement_id: u64,
+    slot: u32,
+) -> Result<u64, HousingError> {
+    owner.require_auth();
+
+    if !env
+        .storage()
+        .persistent()
+        .has(&HousingKey::House(owner.clone()))
+    {
+        return Err(HousingError::HouseNotFound);
+    }
+
+    if slot >= MAX_ACHIEVEMENT_DISPLAYS {
+        return Err(HousingError::InvalidSlot);
+    }
+
+    let progress = achievements::query_progress(env, &owner, achievement_id)
+        .map_err(|_| HousingError::AchievementNotUnlocked)?;
+    if !progress.unlocked {
+        return Err(HousingError::AchievementNotUnlocked);
+    }
+
+    let mut displays: Vec<AchievementDisplay> = env
+        .storage()
+        .persistent()
+        .get(&HousingKey::AchievementDisplay(owner.clone()))
+        .unwrap_or_else(|| Vec::new(env));
+
+    if displays.len() >= MAX_ACHIEVEMENT_DISPLAYS {
+        return Err(HousingError::DisplayLimitReached);
+    }
+
+    for existing in displays.iter() {
+        if existing.achievement_id == achievement_id || existing.slot == slot {
+            return Err(HousingError::AlreadyDisplayed);
+        }
+    }
+
+    let display_id: u64 = env
+        .storage()
+        .persistent()
+        .get::<HousingKey, u64>(&HousingKey::DisplayCounter)
+        .unwrap_or(0)
+        .saturating_add(1);
+    env.storage()
+        .persistent()
+        .set(&HousingKey::DisplayCounter, &display_id);
+
+    displays.push_back(AchievementDisplay {
+        display_id,
+        achievement_id,
+        slot,
+        installed_at: env.ledger().timestamp(),
+    });
+    env.storage()
+        .persistent()
+        .set(&HousingKey::AchievementDisplay(owner.clone()), &displays);
+
+    touch_house(env, &owner)?;
+
+    env.events().publish(
+        (symbol_short!("housing"), symbol_short!("achdsp")),
+        (owner, display_id, achievement_id, slot),
+    );
+
+    Ok(display_id)
+}
+
+/// Remove an achievement display case from a house.
+pub fn remove_achievement_display(
+    env: &Env,
+    owner: Address,
+    display_id: u64,
+) -> Result<(), HousingError> {
+    owner.require_auth();
+
+    let displays: Vec<AchievementDisplay> = env
+        .storage()
+        .persistent()
+        .get(&HousingKey::AchievementDisplay(owner.clone()))
+        .ok_or(HousingError::DisplayNotFound)?;
+
+    let mut remaining = Vec::new(env);
+    let mut found = false;
+    for display in displays.iter() {
+        if display.display_id == display_id && !found {
+            found = true;
+            continue;
+        }
+        remaining.push_back(display);
+    }
+
+    if !found {
+        return Err(HousingError::DisplayNotFound);
+    }
+
+    env.storage()
+        .persistent()
+        .set(&HousingKey::AchievementDisplay(owner.clone()), &remaining);
+    touch_house(env, &owner)?;
+
+    env.events().publish(
+        (symbol_short!("housing"), symbol_short!("achrm")),
+        (owner, display_id),
+    );
+
+    Ok(())
+}
+
+/// List all achievement display cases in a house.
+pub fn get_achievement_displays(env: &Env, owner: &Address) -> Vec<AchievementDisplay> {
+    env.storage()
+        .persistent()
+        .get(&HousingKey::AchievementDisplay(owner.clone()))
+        .unwrap_or_else(|| Vec::new(env))
+}
+
+// ─── Guild Banners ────────────────────────────────────────────────────────────
+
+/// Display the owner's guild banner in their house.
+///
+/// The player must have a guild affiliation recorded in the leaderboards
+/// module; the banner mirrors that guild name so it cannot be forged.
+pub fn set_guild_banner(
+    env: &Env,
+    owner: Address,
+    motto: String,
+) -> Result<(), HousingError> {
+    owner.require_auth();
+
+    if !env
+        .storage()
+        .persistent()
+        .has(&HousingKey::House(owner.clone()))
+    {
+        return Err(HousingError::HouseNotFound);
+    }
+
+    let guild_name =
+        crate::leaderboards::get_player_guild(env, &owner).ok_or(HousingError::NoGuildMembership)?;
+
+    let banner = GuildBanner {
+        guild_name: guild_name.clone(),
+        motto,
+        installed_at: env.ledger().timestamp(),
+    };
+    env.storage()
+        .persistent()
+        .set(&HousingKey::GuildBanner(owner.clone()), &banner);
+    touch_house(env, &owner)?;
+
+    env.events().publish(
+        (symbol_short!("housing"), symbol_short!("gldban")),
+        (owner, guild_name),
+    );
+
+    Ok(())
+}
+
+/// Remove the guild banner from a house.
+pub fn clear_guild_banner(env: &Env, owner: Address) -> Result<(), HousingError> {
+    owner.require_auth();
+
+    if !env
+        .storage()
+        .persistent()
+        .has(&HousingKey::GuildBanner(owner.clone()))
+    {
+        return Err(HousingError::NoGuildMembership);
+    }
+
+    env.storage()
+        .persistent()
+        .remove(&HousingKey::GuildBanner(owner.clone()));
+    touch_house(env, &owner)?;
+
+    env.events().publish(
+        (symbol_short!("housing"), symbol_short!("gldrm")),
+        owner,
+    );
+
+    Ok(())
+}
+
+/// Get the guild banner displayed in a house, if any.
+pub fn get_guild_banner(env: &Env, owner: &Address) -> Option<GuildBanner> {
+    env.storage()
+        .persistent()
+        .get(&HousingKey::GuildBanner(owner.clone()))
+}
+
+// ─── Storage Expansion ────────────────────────────────────────────────────────
+
+/// Cost of expanding to `level` (quadratic: `STORAGE_BASE_COST * level^2`).
+fn storage_upgrade_cost(level: u32) -> u64 {
+    (STORAGE_BASE_COST as u128)
+        .saturating_mul(level as u128)
+        .saturating_mul(level as u128)
+        .min(u64::MAX as u128) as u64
+}
+
+/// Expand a house's storage capacity by one level.
+///
+/// Each level grants [`STORAGE_CAPACITY_PER_LEVEL`] extra item slots. Storage
+/// bonus slots are also usable as extra furniture placements (capped by the
+/// global furniture bound).
+pub fn expand_storage(env: &Env, owner: Address) -> Result<HouseStorage, HousingError> {
+    owner.require_auth();
+
+    if !env
+        .storage()
+        .persistent()
+        .has(&HousingKey::House(owner.clone()))
+    {
+        return Err(HousingError::HouseNotFound);
+    }
+
+    let mut record: HouseStorage = env
+        .storage()
+        .persistent()
+        .get(&HousingKey::Storage(owner.clone()))
+        .unwrap_or_else(|| HouseStorage {
+            owner: owner.clone(),
+            level: 0,
+            base_capacity: BASE_STORAGE_CAPACITY,
+            bonus_capacity: 0,
+            last_expanded_at: env.ledger().timestamp(),
+        });
+
+    if record.level >= MAX_STORAGE_LEVEL {
+        return Err(HousingError::StorageMaxLevelReached);
+    }
+
+    let next_level = record.level.saturating_add(1);
+    let cost = storage_upgrade_cost(next_level);
+    resource_minter::debit_balance(env, &owner, &ResourceType::StellarDust, cost)
+        .map_err(|_| HousingError::InsufficientResources)?;
+
+    record.level = next_level;
+    record.bonus_capacity = STORAGE_CAPACITY_PER_LEVEL.saturating_mul(next_level);
+    record.last_expanded_at = env.ledger().timestamp();
+
+    env.storage()
+        .persistent()
+        .set(&HousingKey::Storage(owner.clone()), &record);
+    touch_house(env, &owner)?;
+
+    env.events().publish(
+        (symbol_short!("housing"), symbol_short!("stexp")),
+        (owner, next_level, record.bonus_capacity, cost),
+    );
+
+    Ok(record)
+}
+
+/// Get the full storage expansion record for a house.
+pub fn get_house_storage(env: &Env, owner: &Address) -> Option<HouseStorage> {
+    env.storage()
+        .persistent()
+        .get(&HousingKey::Storage(owner.clone()))
+}
+
+/// Get the total item capacity of a house (base + expansion bonus).
+pub fn get_storage_capacity(env: &Env, owner: &Address) -> u32 {
+    env.storage()
+        .persistent()
+        .get::<HousingKey, HouseStorage>(&HousingKey::Storage(owner.clone()))
+        .map_or(BASE_STORAGE_CAPACITY, |s| {
+            s.base_capacity.saturating_add(s.bonus_capacity)
+        })
 }
 
 // ─── Queries ──────────────────────────────────────────────────────────────────
@@ -1196,6 +1602,279 @@ mod tests {
         f.run(|| {
             let house = super::get_house(&f.env, &f.player1).unwrap();
             assert_eq!(house.furniture_count, 0);
+        });
+    }
+
+    /// Mark an achievement as unlocked for a player in test storage.
+    fn unlock_achievement(f: &Fixture, player: &Address, achievement_id: u64) {
+        let player = player.clone();
+        f.run(|| {
+            f.env.storage().persistent().set(
+                &crate::achievement_engine::AchievementKey::PlayerAchievement(
+                    player,
+                    achievement_id,
+                ),
+                &f.env.ledger().timestamp(),
+            );
+        });
+    }
+
+    #[test]
+    fn test_install_and_list_achievement_display() {
+        let f = fixture();
+        f.run(|| {
+            super::initialize_house(&f.env, f.player1.clone()).unwrap();
+            unlock_achievement(&f, &f.player1, 1);
+        });
+
+        let display_id =
+            f.run(|| super::install_achievement_display(&f.env, f.player1.clone(), 1, 3).unwrap());
+        assert_eq!(display_id, 1);
+
+        f.run(|| {
+            let displays = super::get_achievement_displays(&f.env, &f.player1);
+            assert_eq!(displays.len(), 1);
+            let display = displays.get(0).unwrap();
+            assert_eq!(display.achievement_id, 1);
+            assert_eq!(display.slot, 3);
+            assert_eq!(display.display_id, 1);
+        });
+    }
+
+    #[test]
+    fn test_achievement_display_requires_unlock() {
+        let f = fixture();
+        f.run(|| super::initialize_house(&f.env, f.player1.clone()).unwrap());
+
+        f.run(|| {
+            assert_eq!(
+                super::install_achievement_display(&f.env, f.player1.clone(), 1, 0),
+                Err(HousingError::AchievementNotUnlocked)
+            );
+        });
+    }
+
+    #[test]
+    fn test_achievement_display_rejects_duplicate_achievement_or_slot() {
+        let f = fixture();
+        f.run(|| super::initialize_house(&f.env, f.player1.clone()).unwrap());
+        unlock_achievement(&f, &f.player1, 1);
+        unlock_achievement(&f, &f.player1, 2);
+
+        f.run(|| {
+            super::install_achievement_display(&f.env, f.player1.clone(), 1, 2).unwrap();
+        });
+        // Same achievement, different slot
+        f.run(|| {
+            assert_eq!(
+                super::install_achievement_display(&f.env, f.player1.clone(), 1, 4),
+                Err(HousingError::AlreadyDisplayed)
+            );
+        });
+        // Different achievement, same slot
+        f.run(|| {
+            assert_eq!(
+                super::install_achievement_display(&f.env, f.player1.clone(), 2, 2),
+                Err(HousingError::AlreadyDisplayed)
+            );
+        });
+    }
+
+    #[test]
+    fn test_achievement_display_slot_bounds() {
+        let f = fixture();
+        f.run(|| super::initialize_house(&f.env, f.player1.clone()).unwrap());
+        unlock_achievement(&f, &f.player1, 1);
+        f.run(|| {
+            assert_eq!(
+                super::install_achievement_display(
+                    &f.env,
+                    f.player1.clone(),
+                    1,
+                    MAX_ACHIEVEMENT_DISPLAYS
+                ),
+                Err(HousingError::InvalidSlot)
+            );
+        });
+    }
+
+    #[test]
+    fn test_remove_achievement_display() {
+        let f = fixture();
+        f.run(|| {
+            super::initialize_house(&f.env, f.player1.clone()).unwrap();
+            unlock_achievement(&f, &f.player1, 1);
+        });
+        let id = f.run(|| super::install_achievement_display(&f.env, f.player1.clone(), 1, 1).unwrap());
+
+        f.run(|| super::remove_achievement_display(&f.env, f.player1.clone(), id).unwrap());
+        f.run(|| {
+            assert!(super::get_achievement_displays(&f.env, &f.player1).is_empty());
+            assert_eq!(
+                super::remove_achievement_display(&f.env, f.player1.clone(), id),
+                Err(HousingError::DisplayNotFound)
+            );
+        });
+    }
+
+    #[test]
+    fn test_guild_banner_requires_membership_and_can_be_cleared() {
+        let f = fixture();
+        f.run(|| super::initialize_house(&f.env, f.player1.clone()).unwrap());
+
+        f.run(|| {
+            assert_eq!(
+                super::set_guild_banner(
+                    &f.env,
+                    f.player1.clone(),
+                    String::from_str(&f.env, "No guild")
+                ),
+                Err(HousingError::NoGuildMembership)
+            );
+        });
+
+        f.run(|| {
+            crate::leaderboards::set_player_guild(
+                &f.env,
+                &f.player1,
+                String::from_str(&f.env, "Nebula Guild"),
+            )
+            .unwrap();
+        });
+
+        f.run(|| {
+            super::set_guild_banner(
+                &f.env,
+                f.player1.clone(),
+                String::from_str(&f.env, "Explore far"),
+            )
+            .unwrap();
+        });
+
+        f.run(|| {
+            let banner = super::get_guild_banner(&f.env, &f.player1).unwrap();
+            assert_eq!(banner.guild_name, String::from_str(&f.env, "Nebula Guild"));
+            assert_eq!(banner.motto, String::from_str(&f.env, "Explore far"));
+        });
+
+        f.run(|| super::clear_guild_banner(&f.env, f.player1.clone()).unwrap());
+        f.run(|| assert!(super::get_guild_banner(&f.env, &f.player1).is_none()));
+    }
+
+    #[test]
+    fn test_storage_expansion_increases_capacity() {
+        let f = fixture();
+        f.run(|| {
+            super::initialize_house(&f.env, f.player1.clone()).unwrap();
+            resource_minter::credit_balance(
+                &f.env,
+                &f.player1,
+                &ResourceType::StellarDust,
+                100_000,
+            )
+            .unwrap();
+        });
+
+        assert_eq!(
+            f.run(|| super::get_storage_capacity(&f.env, &f.player1)),
+            BASE_STORAGE_CAPACITY
+        );
+
+        let record = f.run(|| super::expand_storage(&f.env, f.player1.clone()).unwrap());
+        assert_eq!(record.level, 1);
+        assert_eq!(record.bonus_capacity, STORAGE_CAPACITY_PER_LEVEL);
+        assert_eq!(
+            f.run(|| super::get_storage_capacity(&f.env, &f.player1)),
+            BASE_STORAGE_CAPACITY + STORAGE_CAPACITY_PER_LEVEL
+        );
+    }
+
+    #[test]
+    fn test_storage_expansion_respects_max_level() {
+        let f = fixture();
+        f.run(|| {
+            super::initialize_house(&f.env, f.player1.clone()).unwrap();
+            resource_minter::credit_balance(
+                &f.env,
+                &f.player1,
+                &ResourceType::StellarDust,
+                1_000_000,
+            )
+            .unwrap();
+        });
+        for _ in 0..MAX_STORAGE_LEVEL {
+            f.run(|| super::expand_storage(&f.env, f.player1.clone()).unwrap());
+        }
+        f.run(|| {
+            assert_eq!(
+                super::expand_storage(&f.env, f.player1.clone()),
+                Err(HousingError::StorageMaxLevelReached)
+            );
+        });
+        assert_eq!(
+            f.run(|| super::get_house_storage(&f.env, &f.player1).unwrap().level),
+            MAX_STORAGE_LEVEL
+        );
+    }
+
+    #[test]
+    fn test_storage_expansion_requires_resources() {
+        let f = fixture();
+        f.run(|| super::initialize_house(&f.env, f.player1.clone()).unwrap());
+        f.run(|| {
+            assert_eq!(
+                super::expand_storage(&f.env, f.player1.clone()),
+                Err(HousingError::InsufficientResources)
+            );
+        });
+    }
+
+    #[test]
+    fn test_storage_bonus_grants_extra_furniture_slots() {
+        let f = fixture();
+        f.run(|| {
+            super::initialize_house(&f.env, f.player1.clone()).unwrap();
+            resource_minter::credit_balance(
+                &f.env,
+                &f.player1,
+                &ResourceType::StellarDust,
+                100_000,
+            )
+            .unwrap();
+        });
+        f.run(|| super::expand_storage(&f.env, f.player1.clone()).unwrap());
+
+        let furniture_id = f.run(|| {
+            super::define_furniture(
+                &f.env,
+                f.admin.clone(),
+                String::from_str(&f.env, "Cheap Stool"),
+                FurnitureCategory::Seating,
+                FurnitureRarity::Common,
+                ResourceType::StellarDust,
+                1,
+                false,
+                String::from_str(&f.env, ""),
+                false,
+            )
+            .unwrap()
+        });
+
+        // A Small house normally allows 50 items; with one expansion the
+        // bonus capacity raises the effective limit to 150.
+        for i in 0..55u32 {
+            let x = i % 1000;
+            f.run(|| {
+                super::purchase_furniture(&f.env, f.player1.clone(), furniture_id).unwrap()
+            });
+            f.run(|| {
+                super::place_furniture(&f.env, f.player1.clone(), furniture_id, x, 10, 0, 1)
+                    .unwrap()
+            });
+        }
+        f.run(|| {
+            let house = super::get_house(&f.env, &f.player1).unwrap();
+            assert_eq!(house.furniture_count, 55);
         });
     }
 }

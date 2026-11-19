@@ -524,12 +524,15 @@ pub use notifications::alerts::{
 };
 pub use notifications::push_service::{emit_notification, Notification};
 pub use player_housing::{
-    customize_theme, define_furniture, feature_house, get_featured_houses, get_furniture,
-    get_house, get_placements, get_rating, get_visitors, initialize_house, place_furniture,
-    purchase_furniture, rate_house, remove_furniture, set_house_access, upgrade_house, visit_house,
-    FurnitureCategory, FurnitureItem, FurnitureRarity, HouseAccess, HouseInstance, HouseRating,
-    HouseSize, HousingError, PlacedFurniture, VisitorRecord, MAX_FEATURED_HOUSES,
-    MAX_FURNITURE_PER_HOUSE, MAX_VISITOR_RECORDS,
+    clear_guild_banner, customize_theme, define_furniture, expand_storage, feature_house,
+    get_achievement_displays, get_featured_houses, get_furniture, get_guild_banner, get_house,
+    get_house_storage, get_placements, get_rating, get_storage_capacity, get_visitors,
+    initialize_house, install_achievement_display, place_furniture, purchase_furniture, rate_house,
+    remove_achievement_display, remove_furniture, set_guild_banner, set_house_access, upgrade_house,
+    visit_house, AchievementDisplay, FurnitureCategory, FurnitureItem, FurnitureRarity, GuildBanner,
+    HouseAccess, HouseInstance, HouseRating, HouseSize, HouseStorage, HousingError, PlacedFurniture,
+    VisitorRecord, BASE_STORAGE_CAPACITY, MAX_ACHIEVEMENT_DISPLAYS, MAX_FEATURED_HOUSES,
+    MAX_FURNITURE_PER_HOUSE, MAX_STORAGE_LEVEL, MAX_VISITOR_RECORDS, STORAGE_CAPACITY_PER_LEVEL,
 };
 pub use quest_system::{
     add_quest_node, choose_branch, claim_quest_reward, define_chain, get_active_quest_states,
@@ -4317,6 +4320,210 @@ impl NebulaNomadContract {
     /// Aggregate governance staking statistics.
     pub fn get_global_staking_stats(env: Env) -> GlobalStakingStats {
         staking::get_global_staking_stats(&env)
+    }
+
+    // === Player Housing (Issue #532) ===
+
+    /// Create a personal house (starts at Small size, Public access).
+    pub fn housing_initialize(env: Env, owner: Address) -> Result<HouseInstance, HousingError> {
+        player_housing::initialize_house(&env, owner)
+    }
+
+    /// Upgrade the owner's house to the next size tier.
+    pub fn housing_upgrade(env: Env, owner: Address) -> Result<HouseInstance, HousingError> {
+        player_housing::upgrade_house(&env, owner)
+    }
+
+    /// Change who may visit the owner's house.
+    pub fn housing_set_access(
+        env: Env,
+        owner: Address,
+        access: HouseAccess,
+    ) -> Result<(), HousingError> {
+        player_housing::set_house_access(&env, owner, access)
+    }
+
+    /// Customize wall, floor and lighting themes.
+    pub fn housing_customize_theme(
+        env: Env,
+        owner: Address,
+        wall_theme: u32,
+        floor_theme: u32,
+        lighting_theme: u32,
+    ) -> Result<(), HousingError> {
+        player_housing::customize_theme(&env, owner, wall_theme, floor_theme, lighting_theme)
+    }
+
+    /// Define a new furniture catalog item (admin/creator only).
+    #[allow(clippy::too_many_arguments)]
+    pub fn housing_define_furniture(
+        env: Env,
+        creator: Address,
+        name: String,
+        category: FurnitureCategory,
+        rarity: FurnitureRarity,
+        cost_resource: ResourceType,
+        cost_amount: u64,
+        is_functional: bool,
+        bonus_description: String,
+        is_limited_edition: bool,
+    ) -> Result<u64, HousingError> {
+        player_housing::define_furniture(
+            &env,
+            creator,
+            name,
+            category,
+            rarity,
+            cost_resource,
+            cost_amount,
+            is_functional,
+            bonus_description,
+            is_limited_edition,
+        )
+    }
+
+    /// Purchase a furniture item (it is not placed until `housing_place_furniture`).
+    pub fn housing_purchase_furniture(
+        env: Env,
+        owner: Address,
+        furniture_id: u64,
+    ) -> Result<(), HousingError> {
+        player_housing::purchase_furniture(&env, owner, furniture_id)
+    }
+
+    /// Place a purchased furniture item at a grid position.
+    pub fn housing_place_furniture(
+        env: Env,
+        owner: Address,
+        furniture_id: u64,
+        x: u32,
+        y: u32,
+        rotation: u32,
+        layer: u32,
+    ) -> Result<(), HousingError> {
+        player_housing::place_furniture(&env, owner, furniture_id, x, y, rotation, layer)
+    }
+
+    /// Remove a placed furniture item from the house.
+    pub fn housing_remove_furniture(
+        env: Env,
+        owner: Address,
+        furniture_id: u64,
+    ) -> Result<(), HousingError> {
+        player_housing::remove_furniture(&env, owner, furniture_id)
+    }
+
+    /// Show an unlocked achievement in a display case.
+    pub fn housing_install_achievement(
+        env: Env,
+        owner: Address,
+        achievement_id: u64,
+        slot: u32,
+    ) -> Result<u64, HousingError> {
+        player_housing::install_achievement_display(&env, owner, achievement_id, slot)
+    }
+
+    /// Remove an achievement display case by ID.
+    pub fn housing_remove_achievement(
+        env: Env,
+        owner: Address,
+        display_id: u64,
+    ) -> Result<(), HousingError> {
+        player_housing::remove_achievement_display(&env, owner, display_id)
+    }
+
+    /// Display the owner's guild banner and motto.
+    pub fn housing_set_guild_banner(
+        env: Env,
+        owner: Address,
+        motto: String,
+    ) -> Result<(), HousingError> {
+        player_housing::set_guild_banner(&env, owner, motto)
+    }
+
+    /// Remove the guild banner from the house.
+    pub fn housing_clear_guild_banner(env: Env, owner: Address) -> Result<(), HousingError> {
+        player_housing::clear_guild_banner(&env, owner)
+    }
+
+    /// Expand house storage capacity by one level.
+    pub fn housing_expand_storage(env: Env, owner: Address) -> Result<HouseStorage, HousingError> {
+        player_housing::expand_storage(&env, owner)
+    }
+
+    /// Visit another player's house (subject to its access mode).
+    pub fn housing_visit(env: Env, visitor: Address, house_owner: Address) -> Result<(), HousingError> {
+        player_housing::visit_house(&env, visitor, house_owner)
+    }
+
+    /// Rate a visited house (100-500, i.e. 1-5 stars scaled by 100).
+    pub fn housing_rate(
+        env: Env,
+        visitor: Address,
+        house_owner: Address,
+        rating: u32,
+    ) -> Result<(), HousingError> {
+        player_housing::rate_house(&env, visitor, house_owner, rating)
+    }
+
+    /// Feature a house in a discovery tier (curator only).
+    pub fn housing_feature(
+        env: Env,
+        curator: Address,
+        house_owner: Address,
+        tier: Symbol,
+    ) -> Result<(), HousingError> {
+        player_housing::feature_house(&env, curator, house_owner, tier)
+    }
+
+    /// Read a house by owner address.
+    pub fn housing_get_house(env: Env, owner: Address) -> Option<HouseInstance> {
+        player_housing::get_house(&env, &owner)
+    }
+
+    /// Read a furniture catalog item.
+    pub fn housing_get_furniture(env: Env, furniture_id: u64) -> Option<FurnitureItem> {
+        player_housing::get_furniture(&env, furniture_id)
+    }
+
+    /// Read all placed furniture in a house.
+    pub fn housing_get_placements(env: Env, owner: Address) -> Vec<PlacedFurniture> {
+        player_housing::get_placements(&env, &owner)
+    }
+
+    /// Read a house's rating record.
+    pub fn housing_get_rating(env: Env, owner: Address) -> Option<HouseRating> {
+        player_housing::get_rating(&env, &owner)
+    }
+
+    /// Read recent visitor records for a house.
+    pub fn housing_get_visitors(env: Env, owner: Address) -> Vec<VisitorRecord> {
+        player_housing::get_visitors(&env, &owner)
+    }
+
+    /// Read all achievement display cases in a house.
+    pub fn housing_get_achievement_displays(env: Env, owner: Address) -> Vec<AchievementDisplay> {
+        player_housing::get_achievement_displays(&env, &owner)
+    }
+
+    /// Read the guild banner displayed in a house.
+    pub fn housing_get_guild_banner(env: Env, owner: Address) -> Option<GuildBanner> {
+        player_housing::get_guild_banner(&env, &owner)
+    }
+
+    /// Read the storage expansion record for a house.
+    pub fn housing_get_storage(env: Env, owner: Address) -> Option<HouseStorage> {
+        player_housing::get_house_storage(&env, &owner)
+    }
+
+    /// Read total item capacity (base + expansion bonus) for a house.
+    pub fn housing_get_storage_capacity(env: Env, owner: Address) -> u32 {
+        player_housing::get_storage_capacity(&env, &owner)
+    }
+
+    /// Read featured houses for a discovery tier.
+    pub fn housing_get_featured(env: Env, tier: Symbol) -> Vec<Address> {
+        player_housing::get_featured_houses(&env, tier)
     }
 }
 
