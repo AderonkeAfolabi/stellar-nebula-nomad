@@ -4,7 +4,7 @@
 /// handles cooldowns, energy costs, ability effects, and integrates with PvP combat.
 use soroban_sdk::{contracttype, symbol_short, Address, Env, Symbol, Vec};
 
-use crate::pvp_combat::{PvPError, PvPDataKey, CombatState};
+use crate::pvp_combat::{CombatState, PvPDataKey, PvPError};
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -337,9 +337,10 @@ pub fn init_combat_abilities(env: &Env, combat_id: u64, player: &Address, ship_t
             });
         }
     }
-    env.storage()
-        .persistent()
-        .set(&AbilityKey::CombatAbilityState(combat_id, player.clone()), &states);
+    env.storage().persistent().set(
+        &AbilityKey::CombatAbilityState(combat_id, player.clone()),
+        &states,
+    );
 }
 
 /// Tick down all cooldowns by 1 at the start of a player's turn.
@@ -456,9 +457,11 @@ pub fn use_ability(
         }
         AbilityEffect::EnergyRestore => {
             if is_player1 {
-                combat.player1_energy = (combat.player1_energy + ability.power).min(ABILITY_MAX_ENERGY);
+                combat.player1_energy =
+                    (combat.player1_energy + ability.power).min(ABILITY_MAX_ENERGY);
             } else {
-                combat.player2_energy = (combat.player2_energy + ability.power).min(ABILITY_MAX_ENERGY);
+                combat.player2_energy =
+                    (combat.player2_energy + ability.power).min(ABILITY_MAX_ENERGY);
             }
         }
         AbilityEffect::EnergySiphon => {
@@ -528,11 +531,7 @@ pub fn use_ability(
 }
 
 /// Get current ability states (cooldowns) for a player in a combat.
-pub fn get_ability_states(
-    env: &Env,
-    combat_id: u64,
-    player: &Address,
-) -> Vec<AbilityState> {
+pub fn get_ability_states(env: &Env, combat_id: u64, player: &Address) -> Vec<AbilityState> {
     let key = AbilityKey::CombatAbilityState(combat_id, player.clone());
     env.storage()
         .persistent()

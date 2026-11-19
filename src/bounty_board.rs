@@ -92,7 +92,9 @@ pub fn initialize_bounty_board(env: &Env, admin: &Address) {
     env.storage()
         .instance()
         .set(&BountyKey::Expiry, &DEFAULT_BOUNTY_EXPIRY);
-    env.storage().instance().set(&BountyKey::BountyCounter, &0u64);
+    env.storage()
+        .instance()
+        .set(&BountyKey::BountyCounter, &0u64);
 }
 
 /// Set bounty expiry duration. Admin-only.
@@ -140,7 +142,9 @@ pub fn post_bounty(
     }
 
     let next_id = counter + 1;
-    env.storage().instance().set(&BountyKey::BountyCounter, &next_id);
+    env.storage()
+        .instance()
+        .set(&BountyKey::BountyCounter, &next_id);
 
     let expiry_seconds: u64 = env
         .storage()

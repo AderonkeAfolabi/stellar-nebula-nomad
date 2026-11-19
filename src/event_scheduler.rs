@@ -314,7 +314,9 @@ fn next_event_id(env: &Env) -> u64 {
         .get(&EventKey::EventSchedEventCounter)
         .unwrap_or(0);
     let next = current + 1;
-    env.storage().instance().set(&EventKey::EventSchedEventCounter, &next);
+    env.storage()
+        .instance()
+        .set(&EventKey::EventSchedEventCounter, &next);
     next
 }
 
@@ -350,7 +352,9 @@ fn check_burst_limit(env: &Env) -> Result<(), EventError> {
 
 /// Reset burst counter.
 pub fn reset_burst_counter(env: &Env) {
-    env.storage().instance().set(&EventKey::EventSchedBurstCounter, &0u32);
+    env.storage()
+        .instance()
+        .set(&EventKey::EventSchedBurstCounter, &0u32);
 }
 
 fn add_to_active_events(env: &Env, event_id: u64) -> Result<(), EventError> {
@@ -396,8 +400,12 @@ fn remove_from_active_events(env: &Env, event_id: u64) {
 /// Initialize the event scheduler with an admin address.
 pub fn initialize_scheduler(env: &Env, admin: &Address) {
     admin.require_auth();
-    env.storage().instance().set(&EventKey::EventSchedAdmin, admin);
-    env.storage().instance().set(&EventKey::EventSchedEventCounter, &0u64);
+    env.storage()
+        .instance()
+        .set(&EventKey::EventSchedAdmin, admin);
+    env.storage()
+        .instance()
+        .set(&EventKey::EventSchedEventCounter, &0u64);
     env.storage()
         .instance()
         .set(&EventKey::ActiveEvents, &Vec::<u64>::new(env));
