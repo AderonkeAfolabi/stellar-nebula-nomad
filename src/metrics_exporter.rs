@@ -410,3 +410,37 @@ pub fn reset_metrics(env: &Env, admin: &Address) -> Result<(), MetricsError> {
 
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::test_helpers::has_event_topics;
+    use soroban_sdk::testutils::Address as _;
+    use soroban_sdk::{contract, contractimpl};
+
+    #[contract]
+    struct MetricsStub;
+
+    #[contractimpl]
+    impl MetricsStub {}
+
+    // #577 — the admin is published by value (`admin.clone()`), not as a
+    // `&&Address`, so both admin events convert to a `Val` and are emitted.
+    #[test]
+    fn initialize_and_reset_emit_admin_events() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract = env.register(MetricsStub, ());
+        let admin = Address::generate(&env);
+
+        env.as_contract(&contract, || {
+            initialize_metrics(&env, &admin).unwrap();
+        });
+        assert!(has_event_topics(&env, &["metrics", "init"]));
+
+        env.as_contract(&contract, || {
+            reset_metrics(&env, &admin).unwrap();
+        });
+        assert!(has_event_topics(&env, &["metrics", "reset"]));
+    }
+}
