@@ -11,3 +11,5 @@ export * from './utils/wormholes';
 export * from './views/WormholeNavigator';
 export * from './utils/constellations';
 export * from './views/ConstellationAtlas';
+export * from './utils/housing';
+export * from './views/HousingView';

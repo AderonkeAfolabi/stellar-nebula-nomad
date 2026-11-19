@@ -4439,6 +4439,110 @@ impl NebulaNomadContract {
     ) -> Result<(), weather_system::WeatherError> {
         weather_system::set_region_climate(&env, &admin, region_id, weights)
     }
+
+    // ─── Player Housing (Issues #532, #629) ──────────────────────────────
+
+    /// Create a player's house (Small).
+    pub fn initialize_house(env: Env, owner: Address) -> Result<HouseInstance, HousingError> {
+        player_housing::initialize_house(&env, owner)
+    }
+
+    /// House, layout, displays, banner and storage in one read.
+    pub fn get_house_showcase(env: Env, owner: Address) -> Option<player_housing::HouseShowcase> {
+        player_housing::get_house_showcase(&env, &owner)
+    }
+
+    /// Set wall, floor and lighting themes.
+    pub fn customize_house(
+        env: Env,
+        owner: Address,
+        wall_theme: u32,
+        floor_theme: u32,
+        lighting_theme: u32,
+    ) -> Result<(), HousingError> {
+        player_housing::customize_theme(&env, owner, wall_theme, floor_theme, lighting_theme)
+    }
+
+    /// Buy furniture into storage.
+    pub fn buy_house_furniture(
+        env: Env,
+        owner: Address,
+        furniture_id: u64,
+    ) -> Result<(), HousingError> {
+        player_housing::purchase_furniture(&env, owner, furniture_id)
+    }
+
+    /// Place owned furniture.
+    pub fn place_house_furniture(
+        env: Env,
+        owner: Address,
+        furniture_id: u64,
+        x: u32,
+        y: u32,
+        rotation: u32,
+        layer: u32,
+    ) -> Result<(), HousingError> {
+        player_housing::place_furniture(&env, owner, furniture_id, x, y, rotation, layer)
+    }
+
+    /// Move placed furniture back into storage.
+    pub fn remove_house_furniture(
+        env: Env,
+        owner: Address,
+        furniture_id: u64,
+    ) -> Result<(), HousingError> {
+        player_housing::remove_furniture(&env, owner, furniture_id)
+    }
+
+    /// Buy the next storage expansion.
+    pub fn expand_house_storage(
+        env: Env,
+        owner: Address,
+    ) -> Result<player_housing::StorageSummary, HousingError> {
+        player_housing::expand_storage(&env, owner)
+    }
+
+    /// Show an unlocked achievement in a display case slot.
+    pub fn display_house_achievement(
+        env: Env,
+        owner: Address,
+        achievement_id: u64,
+        slot: u32,
+    ) -> Result<Vec<player_housing::AchievementDisplay>, HousingError> {
+        player_housing::display_achievement(&env, owner, achievement_id, slot)
+    }
+
+    /// Hang the owner's guild banner.
+    pub fn hang_guild_banner(
+        env: Env,
+        owner: Address,
+    ) -> Result<player_housing::GuildBanner, HousingError> {
+        player_housing::display_guild_banner(&env, owner)
+    }
+
+    /// Visit another player's house.
+    pub fn visit_house(
+        env: Env,
+        visitor: Address,
+        house_owner: Address,
+    ) -> Result<(), HousingError> {
+        player_housing::visit_house(&env, visitor, house_owner)
+    }
+
+    /// Rate a visited house (100-500).
+    pub fn rate_house(
+        env: Env,
+        visitor: Address,
+        house_owner: Address,
+        rating: u32,
+    ) -> Result<(), HousingError> {
+        player_housing::rate_house(&env, visitor, house_owner, rating)
+    }
+
+    /// Add a guest to a friends-only house.
+    pub fn add_house_guest(env: Env, owner: Address, guest: Address) -> Result<(), HousingError> {
+        player_housing::add_guest(&env, owner, guest)
+    }
 }
 
 // Game Systems Modules (Issues #528-531)
