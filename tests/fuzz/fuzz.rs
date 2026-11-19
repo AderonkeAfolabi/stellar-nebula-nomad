@@ -198,8 +198,8 @@ fn fuzz_elo_delta_boundaries() {
     for delta in boundary_i64() {
         let initial_rating: i64 = 1000;
         let new_rating = initial_rating.checked_add(delta);
-        // Any i64 delta added to 1000 must stay within i64 range.
-        assert!(new_rating.is_some() || delta == i64::MAX);
+        // checked_add must report overflow exactly when delta exceeds the headroom.
+        assert_eq!(new_rating.is_none(), delta > i64::MAX - initial_rating);
     }
 }
 
