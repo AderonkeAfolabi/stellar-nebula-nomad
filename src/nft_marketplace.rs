@@ -288,6 +288,7 @@ pub enum MarketplaceError {
     SellerListingCapReached = 10,
     ListingExpired = 11,
     SelfPurchase = 12,
+    ListingNotExpired = 13,
 
     // Auctions
     AuctionEnded = 20,
@@ -740,6 +741,161 @@ pub fn cancel_listing(
     );
 
     Ok(())
+}
+
+/// Read a fixed-price listing by ID.
+pub fn get_listing(env: &Env, listing_id: u64) -> Option<FixedPriceListing> {
+    env.storage()
+        .persistent()
+        .get(&MarketplaceKey::NftMarketListing(listing_id))
+}
+
+/// All fixed-price listings created by a seller (active and historical).
+pub fn get_seller_listings(env: &Env, seller: &Address) -> Vec<FixedPriceListing> {
+    let ids: Vec<u64> = env
+        .storage()
+        .persistent()
+        .get(&MarketplaceKey::SellerListings(seller.clone()))
+        .unwrap_or_else(|| Vec::new(env));
+
+    let mut listings = Vec::new(env);
+    for id in ids.iter() {
+        if let Some(listing) = get_listing(env, id) {
+            listings.push_back(listing);
+        }
+    }
+    listings
+}
+
+/// Change the asking price of an active fixed-price listing.
+pub fn update_listing_price(
+    env: &Env,
+    seller: &Address,
+    listing_id: u64,
+    new_price: i128,
+) -> Result<(), MarketplaceError> {
+    seller.require_auth();
+
+    if new_price <= 0 {
+        return Err(MarketplaceError::InvalidPrice);
+    }
+
+    let mut listing: FixedPriceListing = env
+        .storage()
+        .persistent()
+        .get(&MarketplaceKey::NftMarketListing(listing_id))
+        .ok_or(MarketplaceError::NotFound)?;
+
+    if &listing.seller != seller {
+        return Err(MarketplaceError::Unauthorized);
+    }
+    if let Some(expires_at) = listing.expires_at {
+        if env.ledger().timestamp() > expires_at {
+            return Err(MarketplaceError::ListingExpired);
+        }
+    }
+
+    listing.price = new_price;
+    env.storage()
+        .persistent()
+        .set(&MarketplaceKey::NftMarketListing(listing_id), &listing);
+
+    env.events().publish(
+        (symbol_short!("market"), symbol_short!("reprice")),
+        (seller.clone(), listing_id, new_price),
+    );
+
+    Ok(())
+}
+
+/// Permissionless cleanup of an expired listing: releases escrow and removes it.
+pub fn expire_listing(env: &Env, listing_id: u64) -> Result<(), MarketplaceError> {
+    let listing: FixedPriceListing = env
+        .storage()
+        .persistent()
+        .get(&MarketplaceKey::NftMarketListing(listing_id))
+        .ok_or(MarketplaceError::NotFound)?;
+
+    let expires_at = listing.expires_at.ok_or(MarketplaceError::ListingNotExpired)?;
+    if env.ledger().timestamp() <= expires_at {
+        return Err(MarketplaceError::ListingNotExpired);
+    }
+
+    env.storage()
+        .persistent()
+        .remove(&MarketplaceKey::EscrowedAsset(listing_id));
+    remove_listing(env, &listing.seller, listing_id);
+    bump_counter(env, MarketplaceKey::TotalListings, -1);
+
+    env.events().publish(
+        (symbol_short!("market"), symbol_short!("expire")),
+        (listing_id, listing.seller),
+    );
+
+    Ok(())
+}
+
+/// Create a fixed-price listing for a ship NFT.
+///
+/// The category is set by this helper so callers cannot accidentally list a
+/// ship under the wrong market filter.
+pub fn create_ship_listing(
+    env: &Env,
+    seller: &Address,
+    ship_id: u64,
+    rarity: Rarity,
+    name: String,
+    price: i128,
+    expires_at: Option<u64>,
+) -> Result<u64, MarketplaceError> {
+    let asset = Asset {
+        category: AssetCategory::ShipNFT,
+        asset_id: ship_id,
+        quantity: 1,
+        rarity,
+        name,
+    };
+    create_listing(env, seller, asset, price, expires_at)
+}
+
+/// Create a fixed-price listing for a skin NFT.
+pub fn create_skin_listing(
+    env: &Env,
+    seller: &Address,
+    skin_id: u64,
+    rarity: Rarity,
+    name: String,
+    price: i128,
+    expires_at: Option<u64>,
+) -> Result<u64, MarketplaceError> {
+    let asset = Asset {
+        category: AssetCategory::SkinNFT,
+        asset_id: skin_id,
+        quantity: 1,
+        rarity,
+        name,
+    };
+    create_listing(env, seller, asset, price, expires_at)
+}
+
+/// Create a fixed-price listing for a badge NFT.
+pub fn create_badge_listing(
+    env: &Env,
+    seller: &Address,
+    badge_id: u64,
+    rarity: Rarity,
+    name: String,
+    price: i128,
+    expires_at: Option<u64>,
+) -> Result<u64, MarketplaceError> {
+    let asset = Asset {
+        category: AssetCategory::Badge,
+        asset_id: badge_id,
+        quantity: 1,
+        rarity,
+        name,
+    };
+    create_listing(env, seller, asset, price, expires_at)
 }
 
 fn remove_listing(env: &Env, seller: &Address, listing_id: u64) {
