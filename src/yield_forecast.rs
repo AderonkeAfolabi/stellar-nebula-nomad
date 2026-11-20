@@ -92,6 +92,37 @@ pub struct YieldForecast {
     pub model_version: u32,
 }
 
+/// Risk bucket for a player's yield history.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[contracttype]
+pub enum YieldRiskLevel {
+    /// Not enough history to judge (fewer than 2 points).
+    Unknown,
+    Low,
+    Medium,
+    High,
+}
+
+/// Risk and trend summary used to recommend a strategy.
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[contracttype]
+pub struct YieldRiskReport {
+    pub data_points: u32,
+    pub average_yield: i128,
+    /// Average change per day (can be negative).
+    pub trend_per_day: i128,
+    /// Mean absolute deviation as a % of the average yield.
+    pub volatility_pct: i128,
+    pub level: YieldRiskLevel,
+    /// `hold`, `diversify`, `reduce` or `observe`.
+    pub recommendation: Symbol,
+}
+
+/// Volatility (%) at or below which yield counts as low risk.
+pub const LOW_RISK_VOLATILITY_PCT: i128 = 15;
+/// Volatility (%) above which yield counts as high risk.
+pub const HIGH_RISK_VOLATILITY_PCT: i128 = 40;
+
 /// Model parameters for yield prediction.
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[contracttype]
@@ -119,7 +150,9 @@ impl Default for ModelParams {
 pub fn initialize(env: &Env, admin: &Address) -> Result<(), ForecastError> {
     admin.require_auth();
 
-    env.storage().instance().set(&DataKey::YieldForecastAdmin, admin);
+    env.storage()
+        .instance()
+        .set(&DataKey::YieldForecastAdmin, admin);
     env.storage().instance().set(&DataKey::ModelVersion, &1u32);
     env.storage()
         .instance()
@@ -436,6 +469,55 @@ fn calculate_volatility(env: &Env, data: &Vec<YieldDataPoint>) -> i128 {
         (mad * 100) / avg
     } else {
         mad
+    }
+}
+
+/// Maps volatility and trend to a risk level and a recommended action.
+fn classify_risk(
+    env: &Env,
+    points: u32,
+    volatility_pct: i128,
+    trend: i128,
+) -> (YieldRiskLevel, Symbol) {
+    if points < 2 {
+        return (YieldRiskLevel::Unknown, Symbol::new(env, "observe"));
+    }
+    let level = if volatility_pct <= LOW_RISK_VOLATILITY_PCT {
+        YieldRiskLevel::Low
+    } else if volatility_pct <= HIGH_RISK_VOLATILITY_PCT {
+        YieldRiskLevel::Medium
+    } else {
+        YieldRiskLevel::High
+    };
+    let action = match level {
+        YieldRiskLevel::High if trend < 0 => "reduce",
+        YieldRiskLevel::High | YieldRiskLevel::Medium => "diversify",
+        _ if trend < 0 => "diversify",
+        _ => "hold",
+    };
+    (level, Symbol::new(env, action))
+}
+
+/// Risk analysis of a player's recorded yield history: average, daily trend,
+/// volatility, a risk level and a recommended action.
+pub fn analyze_yield_risk(env: &Env, player: &Address) -> YieldRiskReport {
+    let history = get_player_history(env, player);
+    let points = history.len();
+    let average_yield = if points == 0 {
+        0
+    } else {
+        calculate_moving_average(env, &history)
+    };
+    let trend_per_day = calculate_trend(env, &history);
+    let volatility_pct = calculate_volatility(env, &history);
+    let (level, recommendation) = classify_risk(env, points, volatility_pct, trend_per_day);
+    YieldRiskReport {
+        data_points: points,
+        average_yield,
+        trend_per_day,
+        volatility_pct,
+        level,
+        recommendation,
     }
 }
 

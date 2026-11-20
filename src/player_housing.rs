@@ -9,11 +9,8 @@
 //! - **Housing Instances**: Each player has a unique personal space
 //! - **Size Tiers**: Small → Medium → Large with upgrade paths
 //! - **Customization**: Walls, floors, lighting, furniture placement
-//! - **Furniture System**: Define, purchase, place, rotate and remove items
-//! - **Achievement Display Cases**: Show off earned badges and accomplishments
-//! - **Guild Banners**: Display your guild affiliation and motto
-//! - **Storage Expansion**: Upgradeable capacity that grants extra furniture slots
-//! - **Functional Items**: Crafting stations and other bonus-granting furniture
+//! - **Achievement Display**: Show off earned badges and accomplishments
+//! - **Functional Items**: Crafting stations, storage expansion
 //! - **Visiting System**: Public/private/friends-only access control
 //! - **Rating System**: Players can rate visited houses (1-5 stars)
 //! - **Discovery**: Browse trending and popular houses
@@ -27,14 +24,24 @@
 //! HousingKey::Rating(owner)      → HouseRating
 //! HousingKey::Visitors(owner)    → Vec<VisitorRecord>
 //! HousingKey::Discovery(tier)    → Vec<Address> (featured houses)
-//! HousingKey::AchievementDisplay(owner) → Vec<AchievementDisplay>
-//! HousingKey::GuildBanner(owner) → GuildBanner
-//! HousingKey::Storage(owner)     → HouseStorage
+//! HousingKey::Inventory(owner)    → Map<u64, u32> (owned, unplaced furniture)
+//! HousingKey::Storage(owner)      → u32 (storage expansions bought)
+//! HousingKey::Displays(owner)     → Vec<AchievementDisplay>
+//! HousingKey::Banner(owner)       → GuildBanner
+//! HousingKey::Guests(owner)       → Vec<Address> (friends-only guest list)
 //! ```
+//!
+//! Completed in #629: furniture ownership (buy → inventory → place → back to
+//! inventory), theme limits per size, achievement display cases, guild
+//! banners, storage expansion and a guest list for friends-only houses. See
+//! `docs/PLAYER_HOUSING.md`.
 
-use soroban_sdk::{contracterror, contracttype, symbol_short, Address, Env, String, Symbol, Vec};
+use soroban_sdk::{
+    contracterror, contracttype, symbol_short, Address, Env, Map, String, Symbol, Vec,
+};
 
 use crate::achievements;
+use crate::alliance_manager;
 use crate::player_profile::{self, ProfileError};
 use crate::resource_minter::{self, ResourceType};
 
@@ -52,26 +59,41 @@ pub const MAX_FEATURED_HOUSES: u32 = 20;
 /// Maximum furniture categories.
 pub const MAX_FURNITURE_CATEGORIES: u32 = 10;
 
-/// Maximum achievement display cases a house can hold.
+/// Storage slots per expansion purchase.
+pub const STORAGE_PER_EXPANSION: u32 = 10;
+
+/// Extra storage slots per placed Storage-category furniture item.
+pub const STORAGE_PER_STORAGE_ITEM: u32 = 5;
+
+/// Maximum storage expansions per house.
+pub const MAX_STORAGE_EXPANSIONS: u32 = 5;
+
+/// Stellar Dust cost of the first storage expansion; each next one costs more.
+pub const STORAGE_EXPANSION_BASE_COST: u64 = 1_000;
+
+/// Achievement slots provided by each placed Achievement-category item.
+pub const SLOTS_PER_DISPLAY_CASE: u32 = 3;
+
+/// Maximum guests on a friends-only guest list.
+pub const MAX_GUESTS: u32 = 50;
+
+// ── PR #636 compatibility constants ─────────────────────────────────────────
+// These keep the symbols exported by the earlier housing branch available.
+// The canonical storage model remains the upstream (#629) one above.
+
+/// Upper bound used by the legacy display-case API.
 pub const MAX_ACHIEVEMENT_DISPLAYS: u32 = 24;
-
-/// Maximum storage expansion level.
-pub const MAX_STORAGE_LEVEL: u32 = 5;
-
-/// Base item capacity before any storage upgrades.
-pub const BASE_STORAGE_CAPACITY: u32 = 100;
-
-/// Extra item slots granted per storage expansion level.
-pub const STORAGE_CAPACITY_PER_LEVEL: u32 = 100;
-
-/// Cost of the first storage expansion (quadratic scaling thereafter).
-pub const STORAGE_BASE_COST: u64 = 2_000;
+/// Alias for [`MAX_STORAGE_EXPANSIONS`].
+pub const MAX_STORAGE_LEVEL: u32 = MAX_STORAGE_EXPANSIONS;
+/// Small-house base capacity, for legacy capacity reporting.
+pub const BASE_STORAGE_CAPACITY: u32 = 10;
+/// Alias for [`STORAGE_PER_EXPANSION`].
+pub const STORAGE_CAPACITY_PER_LEVEL: u32 = STORAGE_PER_EXPANSION;
+/// Alias for [`STORAGE_EXPANSION_BASE_COST`].
+pub const STORAGE_BASE_COST: u64 = STORAGE_EXPANSION_BASE_COST;
 
 /// Auto-increment counter for furniture IDs.
 const FURNITURE_COUNTER: Symbol = symbol_short!("fnc");
-
-/// Auto-increment counter for achievement display IDs.
-const DISPLAY_COUNTER: Symbol = symbol_short!("dsp");
 
 // ─── Storage Keys ─────────────────────────────────────────────────────────────
 
@@ -90,16 +112,20 @@ pub enum HousingKey {
     Visitors(Address),
     /// Featured houses for a discovery tier.
     Discovery(Symbol),
-    /// Achievement display cases for an owner.
-    AchievementDisplay(Address),
-    /// Guild banner displayed in an owner's house.
-    GuildBanner(Address),
-    /// Storage expansion record for an owner.
-    Storage(Address),
-    /// Global counter for furniture IDs.
+    /// Furniture counter.
     HousingCounter,
-    /// Global counter for achievement display IDs.
-    DisplayCounter,
+    /// Owned furniture not yet placed: furniture_id -> count.
+    Inventory(Address),
+    /// Storage expansions bought.
+    Storage(Address),
+    /// Achievements on display.
+    Displays(Address),
+    /// Guild banner on display.
+    Banner(Address),
+    /// Guest list for friends-only access.
+    Guests(Address),
+    /// Motto shown with the guild banner (PR #636 compatibility).
+    GuildMotto(Address),
 }
 
 // ─── Data Types ───────────────────────────────────────────────────────────────
@@ -221,6 +247,63 @@ pub struct HouseRating {
     pub ratings: Vec<(Address, u32)>,
 }
 
+/// An achievement shown in a display case.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct AchievementDisplay {
+    pub slot: u32,
+    pub achievement_id: u64,
+    pub displayed_at: u64,
+}
+
+/// The owner's guild banner.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct GuildBanner {
+    pub alliance_id: u64,
+    pub alliance_name: String,
+    pub displayed_at: u64,
+}
+
+/// Storage capacity and use for a house.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct StorageSummary {
+    pub capacity: u32,
+    pub used: u32,
+    pub expansions: u32,
+    /// Stellar Dust cost of the next expansion (0 when maxed out).
+    pub next_expansion_cost: u64,
+}
+
+/// Legacy storage expansion record exposed by PR #636. The values are derived
+/// from the canonical [`StorageSummary`]; no separate storage is written.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct HouseStorage {
+    pub owner: Address,
+    /// Number of completed expansions.
+    pub level: u32,
+    /// Capacity granted by the house size alone.
+    pub base_capacity: u32,
+    /// Capacity granted by expansions and Storage-category furniture.
+    pub bonus_capacity: u32,
+    pub last_expanded_at: u64,
+}
+
+/// Everything a visitor sees when entering a house, in one read.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct HouseShowcase {
+    pub house: HouseInstance,
+    pub placements: Vec<PlacedFurniture>,
+    pub displays: Vec<AchievementDisplay>,
+    /// The guild banner, if any (empty or one entry: `Option` of a custom
+    /// type can't be a `#[contracttype]` field).
+    pub banner: Vec<GuildBanner>,
+    pub storage: StorageSummary,
+}
+
 /// Record of a visitor to a house.
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -228,41 +311,6 @@ pub struct VisitorRecord {
     pub visitor: Address,
     pub visited_at: u64,
     pub left_rating: bool,
-}
-
-/// An unlocked achievement shown in a house display case.
-#[contracttype]
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct AchievementDisplay {
-    pub display_id: u64,
-    pub achievement_id: u64,
-    /// Display slot index (0-based, bounded by [`MAX_ACHIEVEMENT_DISPLAYS`]).
-    pub slot: u32,
-    pub installed_at: u64,
-}
-
-/// A guild banner displayed in a player's house.
-#[contracttype]
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct GuildBanner {
-    pub guild_name: String,
-    /// Short motto shown beneath the guild name.
-    pub motto: String,
-    pub installed_at: u64,
-}
-
-/// Storage expansion state for a house.
-#[contracttype]
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct HouseStorage {
-    pub owner: Address,
-    /// Number of completed expansions (0 = base capacity).
-    pub level: u32,
-    /// Capacity available before upgrades.
-    pub base_capacity: u32,
-    /// Additional capacity granted by upgrades.
-    pub bonus_capacity: u32,
-    pub last_expanded_at: u64,
 }
 
 // ─── Errors ───────────────────────────────────────────────────────────────────
@@ -305,48 +353,54 @@ pub enum HousingError {
     InvalidAccess = 16,
     /// Furniture already placed at this position.
     PositionOccupied = 17,
-    /// Achievement has not been unlocked by the player.
-    AchievementNotUnlocked = 18,
-    /// All achievement display cases are in use.
-    DisplayLimitReached = 19,
-    /// Display case does not exist.
-    DisplayNotFound = 20,
-    /// Display slot is out of range.
-    InvalidSlot = 21,
-    /// Player does not belong to a guild.
-    NoGuildMembership = 22,
-    /// Storage expansion is already at the maximum level.
-    StorageMaxLevelReached = 23,
-    /// Achievement is already on display (or slot already taken).
-    AlreadyDisplayed = 24,
+    /// Theme ID is not available at this house size.
+    InvalidTheme = 18,
+    /// Storage has no free slot.
+    StorageFull = 19,
+    /// The owner has no unplaced copy of this furniture.
+    NotOwned = 20,
+    /// No more storage expansions are available.
+    StorageMaxed = 21,
+    /// The owner has not unlocked this achievement.
+    AchievementNotEarned = 22,
+    /// No display case slot is available for this slot index.
+    NoDisplayCase = 23,
+    /// The owner is not in a guild.
+    NotInGuild = 24,
+    /// A visitor must visit a house before rating it.
+    MustVisitFirst = 25,
+    /// The guest list is full.
+    GuestListFull = 26,
 }
 
 impl crate::error_standard::StandardContractError for HousingError {
     fn descriptor(self) -> crate::error_standard::ErrorDescriptor {
         use crate::error_standard::ErrorKind;
         let (kind, retryable) = match self {
-            Self::HouseNotFound
-            | Self::FurnitureNotFound
-            | Self::ProfileNotFound
-            | Self::DisplayNotFound => (ErrorKind::NotFound, false),
-            Self::HouseAlreadyExists
-            | Self::AlreadyRated
-            | Self::CannotRateSelf
-            | Self::AlreadyDisplayed => (ErrorKind::Conflict, false),
+            Self::HouseNotFound | Self::FurnitureNotFound | Self::ProfileNotFound => {
+                (ErrorKind::NotFound, false)
+            }
+            Self::HouseAlreadyExists | Self::AlreadyRated | Self::CannotRateSelf => {
+                (ErrorKind::Conflict, false)
+            }
             Self::InsufficientResources => (ErrorKind::ResourceLimit, true),
             Self::MaxSizeReached
             | Self::FurnitureLimitReached
             | Self::VisitorLimitReached
-            | Self::FeaturedLimitReached
-            | Self::DisplayLimitReached
-            | Self::StorageMaxLevelReached => (ErrorKind::ResourceLimit, false),
+            | Self::FeaturedLimitReached => (ErrorKind::ResourceLimit, false),
             Self::InvalidPlacement
             | Self::InvalidRating
             | Self::InvalidAccess
-            | Self::InvalidSlot
             | Self::PositionOccupied
-            | Self::AchievementNotUnlocked
-            | Self::NoGuildMembership => (ErrorKind::Validation, false),
+            | Self::InvalidTheme
+            | Self::NoDisplayCase => (ErrorKind::Validation, false),
+            Self::StorageFull | Self::StorageMaxed | Self::GuestListFull => {
+                (ErrorKind::ResourceLimit, false)
+            }
+            Self::NotOwned
+            | Self::AchievementNotEarned
+            | Self::NotInGuild
+            | Self::MustVisitFirst => (ErrorKind::Conflict, false),
             Self::AccessDenied => (ErrorKind::Authorization, false),
             Self::ArithmeticOverflow => (ErrorKind::Internal, false),
         };
@@ -419,18 +473,6 @@ pub fn initialize_house(env: &Env, owner: Address) -> Result<HouseInstance, Hous
             average_rating: 0,
             total_ratings: 0,
             ratings: Vec::new(env),
-        },
-    );
-
-    // Initialize storage expansion record at base capacity
-    env.storage().persistent().set(
-        &HousingKey::Storage(owner.clone()),
-        &HouseStorage {
-            owner: owner.clone(),
-            level: 0,
-            base_capacity: BASE_STORAGE_CAPACITY,
-            bonus_capacity: 0,
-            last_expanded_at: now,
         },
     );
 
@@ -522,6 +564,13 @@ pub fn customize_theme(
         .get(&HousingKey::House(owner.clone()))
         .ok_or(HousingError::HouseNotFound)?;
 
+    let max_theme = themes_for(house.size);
+    for theme in [wall_theme, floor_theme, lighting_theme] {
+        if theme == 0 || theme > max_theme {
+            return Err(HousingError::InvalidTheme);
+        }
+    }
+
     house.wall_theme = wall_theme;
     house.floor_theme = floor_theme;
     house.lighting_theme = lighting_theme;
@@ -611,9 +660,20 @@ pub fn purchase_furniture(
         .get(&HousingKey::Furniture(furniture_id))
         .ok_or(HousingError::FurnitureNotFound)?;
 
+    let summary = storage_summary(env, &owner, &house);
+    if summary.used >= summary.capacity {
+        return Err(HousingError::StorageFull);
+    }
+
     // Debit cost
     resource_minter::debit_balance(env, &owner, &item.cost_resource, item.cost_amount)
         .map_err(|_| HousingError::InsufficientResources)?;
+
+    let mut inventory = get_inventory(env, &owner);
+    inventory.set(furniture_id, inventory.get(furniture_id).unwrap_or(0) + 1);
+    env.storage()
+        .persistent()
+        .set(&HousingKey::Inventory(owner.clone()), &inventory);
 
     env.events().publish(
         (symbol_short!("housing"), symbol_short!("buy")),
@@ -660,20 +720,11 @@ pub fn place_furniture(
         return Err(HousingError::InvalidPlacement);
     }
 
-    // Storage expansions grant extra furniture slots on top of the size-tier
-    // allowance, capped by the global bound used to keep iteration bounded.
-    let storage_bonus = env
-        .storage()
-        .persistent()
-        .get::<HousingKey, HouseStorage>(&HousingKey::Storage(owner.clone()))
-        .map_or(0, |s| s.bonus_capacity);
     let max_furniture = match house.size {
         HouseSize::Small => 50u32,
         HouseSize::Medium => 100u32,
         HouseSize::Large => MAX_FURNITURE_PER_HOUSE,
-    }
-    .saturating_add(storage_bonus)
-    .min(MAX_FURNITURE_PER_HOUSE);
+    };
 
     if house.furniture_count >= max_furniture {
         return Err(HousingError::FurnitureLimitReached);
@@ -684,6 +735,26 @@ pub fn place_furniture(
         .persistent()
         .get(&HousingKey::Placement(owner.clone()))
         .unwrap_or_else(|| Vec::new(env));
+
+    for existing in placements.iter() {
+        if existing.x == x && existing.y == y && existing.layer == layer {
+            return Err(HousingError::PositionOccupied);
+        }
+    }
+
+    let mut inventory = get_inventory(env, &owner);
+    let owned = inventory.get(furniture_id).unwrap_or(0);
+    if owned == 0 {
+        return Err(HousingError::NotOwned);
+    }
+    if owned == 1 {
+        inventory.remove(furniture_id);
+    } else {
+        inventory.set(furniture_id, owned - 1);
+    }
+    env.storage()
+        .persistent()
+        .set(&HousingKey::Inventory(owner.clone()), &inventory);
 
     let placed = PlacedFurniture {
         furniture_id,
@@ -743,6 +814,21 @@ pub fn remove_furniture(env: &Env, owner: Address, furniture_id: u64) -> Result<
         return Err(HousingError::FurnitureNotFound);
     }
 
+    // The piece goes back into storage; refuse if there is no room for it.
+    let summary = storage_summary(env, &owner, &house);
+    let removed_storage_slots = match get_furniture(env, furniture_id) {
+        Some(item) if item.category == FurnitureCategory::Storage => STORAGE_PER_STORAGE_ITEM,
+        _ => 0,
+    };
+    if summary.used + 1 > summary.capacity.saturating_sub(removed_storage_slots) {
+        return Err(HousingError::StorageFull);
+    }
+    let mut inventory = get_inventory(env, &owner);
+    inventory.set(furniture_id, inventory.get(furniture_id).unwrap_or(0) + 1);
+    env.storage()
+        .persistent()
+        .set(&HousingKey::Inventory(owner.clone()), &inventory);
+
     house.furniture_count = new_placements.len();
     house.last_modified = env.ledger().timestamp();
 
@@ -752,6 +838,19 @@ pub fn remove_furniture(env: &Env, owner: Address, furniture_id: u64) -> Result<
     env.storage()
         .persistent()
         .set(&HousingKey::House(owner.clone()), &house);
+
+    // Removing a display case may drop achievement slots.
+    let slots = display_slots(env, &owner, &house);
+    let displays = get_achievement_displays(env, &owner);
+    let mut kept = Vec::new(env);
+    for display in displays.iter() {
+        if display.slot < slots {
+            kept.push_back(display);
+        }
+    }
+    env.storage()
+        .persistent()
+        .set(&HousingKey::Displays(owner.clone()), &kept);
 
     env.events().publish(
         (symbol_short!("housing"), symbol_short!("remove")),
@@ -781,9 +880,9 @@ pub fn visit_house(env: &Env, visitor: Address, house_owner: Address) -> Result<
             }
         }
         HouseAccess::FriendsOnly => {
-            // For simplicity, allow if visitor has a profile
-            // In full implementation, check bonding or guild membership
-            player_profile::get_profile_by_owner(env, &visitor)?;
+            if !is_friend(env, &house_owner, &visitor) {
+                return Err(HousingError::AccessDenied);
+            }
         }
         HouseAccess::Public => {}
     }
@@ -797,16 +896,18 @@ pub fn visit_house(env: &Env, visitor: Address, house_owner: Address) -> Result<
         .get(&HousingKey::Visitors(house_owner.clone()))
         .unwrap_or_else(|| Vec::new(env));
 
-    if visitors.len() < MAX_VISITOR_RECORDS {
-        visitors.push_back(VisitorRecord {
-            visitor: visitor.clone(),
-            visited_at: env.ledger().timestamp(),
-            left_rating: false,
-        });
-        env.storage()
-            .persistent()
-            .set(&HousingKey::Visitors(house_owner.clone()), &visitors);
+    // Keep the most recent MAX_VISITOR_RECORDS visits.
+    if visitors.len() >= MAX_VISITOR_RECORDS {
+        visitors.pop_front();
     }
+    visitors.push_back(VisitorRecord {
+        visitor: visitor.clone(),
+        visited_at: env.ledger().timestamp(),
+        left_rating: false,
+    });
+    env.storage()
+        .persistent()
+        .set(&HousingKey::Visitors(house_owner.clone()), &visitors);
 
     env.storage()
         .persistent()
@@ -861,6 +962,24 @@ pub fn rate_house(
             return Err(HousingError::AlreadyRated);
         }
     }
+
+    // Only visitors can rate; mark their latest visit as rated.
+    let mut visitors = get_visitors(env, &house_owner);
+    let mut latest = None;
+    for (index, record) in visitors.iter().enumerate() {
+        if record.visitor == visitor {
+            latest = Some(index as u32);
+        }
+    }
+    let Some(index) = latest else {
+        return Err(HousingError::MustVisitFirst);
+    };
+    let mut record = visitors.get(index).ok_or(HousingError::MustVisitFirst)?;
+    record.left_rating = true;
+    visitors.set(index, record);
+    env.storage()
+        .persistent()
+        .set(&HousingKey::Visitors(house_owner.clone()), &visitors);
 
     // Add rating
     house_rating.ratings.push_back((visitor.clone(), rating));
@@ -941,301 +1060,320 @@ pub fn feature_house(
     Ok(())
 }
 
-// ─── Achievement Display Cases ────────────────────────────────────────────────
+// ─── Customization limits ─────────────────────────────────────────────────────
 
-/// Update a house's `last_modified` timestamp after a customization change.
-fn touch_house(env: &Env, owner: &Address) -> Result<(), HousingError> {
-    let mut house: HouseInstance = env
-        .storage()
-        .persistent()
-        .get(&HousingKey::House(owner.clone()))
-        .ok_or(HousingError::HouseNotFound)?;
-    house.last_modified = env.ledger().timestamp();
-    env.storage()
-        .persistent()
-        .set(&HousingKey::House(owner.clone()), &house);
-    Ok(())
+/// Number of wall/floor/lighting themes unlocked at a house size.
+pub fn themes_for(size: HouseSize) -> u32 {
+    match size {
+        HouseSize::Small => 5,
+        HouseSize::Medium => 10,
+        HouseSize::Large => 20,
+    }
 }
 
-/// Install an unlocked achievement into a display case in the owner's house.
-///
-/// The achievement must already be unlocked by the player (verified through
-/// the achievements catalog). Each achievement and each slot may only be used
-/// once, and the number of cases is bounded by [`MAX_ACHIEVEMENT_DISPLAYS`].
-pub fn install_achievement_display(
+/// Achievement display slots a house size can hold at most.
+pub fn max_display_slots(size: HouseSize) -> u32 {
+    match size {
+        HouseSize::Small => 3,
+        HouseSize::Medium => 6,
+        HouseSize::Large => 12,
+    }
+}
+
+/// Base storage slots by house size.
+pub fn base_storage(size: HouseSize) -> u32 {
+    match size {
+        HouseSize::Small => 10,
+        HouseSize::Medium => 20,
+        HouseSize::Large => 40,
+    }
+}
+
+fn require_house(env: &Env, owner: &Address) -> Result<HouseInstance, HousingError> {
+    env.storage()
+        .persistent()
+        .get(&HousingKey::House(owner.clone()))
+        .ok_or(HousingError::HouseNotFound)
+}
+
+fn count_placed(env: &Env, owner: &Address, category: FurnitureCategory) -> u32 {
+    let mut count = 0;
+    for placed in get_placements(env, owner).iter() {
+        if let Some(item) = get_furniture(env, placed.furniture_id) {
+            if item.category == category {
+                count += 1;
+            }
+        }
+    }
+    count
+}
+
+// ─── Storage expansion ────────────────────────────────────────────────────────
+
+/// Owned, unplaced furniture: furniture_id -> count.
+pub fn get_inventory(env: &Env, owner: &Address) -> Map<u64, u32> {
+    env.storage()
+        .persistent()
+        .get(&HousingKey::Inventory(owner.clone()))
+        .unwrap_or_else(|| Map::new(env))
+}
+
+fn expansions_of(env: &Env, owner: &Address) -> u32 {
+    env.storage()
+        .persistent()
+        .get(&HousingKey::Storage(owner.clone()))
+        .unwrap_or(0)
+}
+
+fn expansion_cost(expansions: u32) -> u64 {
+    if expansions >= MAX_STORAGE_EXPANSIONS {
+        0
+    } else {
+        STORAGE_EXPANSION_BASE_COST * u64::from(expansions + 1)
+    }
+}
+
+fn storage_summary(env: &Env, owner: &Address, house: &HouseInstance) -> StorageSummary {
+    let expansions = expansions_of(env, owner);
+    let capacity = base_storage(house.size)
+        + expansions * STORAGE_PER_EXPANSION
+        + count_placed(env, owner, FurnitureCategory::Storage) * STORAGE_PER_STORAGE_ITEM;
+    let used = get_inventory(env, owner).values().iter().sum();
+    StorageSummary {
+        capacity,
+        used,
+        expansions,
+        next_expansion_cost: expansion_cost(expansions),
+    }
+}
+
+/// Storage capacity and use. Capacity grows with house size, expansions and
+/// placed Storage-category furniture.
+pub fn get_storage(env: &Env, owner: &Address) -> Result<StorageSummary, HousingError> {
+    let house = require_house(env, owner)?;
+    Ok(storage_summary(env, owner, &house))
+}
+
+/// Buy the next storage expansion (+[`STORAGE_PER_EXPANSION`] slots). Each
+/// expansion costs [`STORAGE_EXPANSION_BASE_COST`] times its number.
+pub fn expand_storage(env: &Env, owner: Address) -> Result<StorageSummary, HousingError> {
+    owner.require_auth();
+    let house = require_house(env, &owner)?;
+    let expansions = expansions_of(env, &owner);
+    if expansions >= MAX_STORAGE_EXPANSIONS {
+        return Err(HousingError::StorageMaxed);
+    }
+    let cost = expansion_cost(expansions);
+    resource_minter::debit_balance(env, &owner, &ResourceType::StellarDust, cost)
+        .map_err(|_| HousingError::InsufficientResources)?;
+    env.storage()
+        .persistent()
+        .set(&HousingKey::Storage(owner.clone()), &(expansions + 1));
+    env.events().publish(
+        (symbol_short!("housing"), symbol_short!("storage")),
+        (owner.clone(), expansions + 1, cost),
+    );
+    Ok(storage_summary(env, &owner, &house))
+}
+
+// ─── Achievement display cases ────────────────────────────────────────────────
+
+fn display_slots(env: &Env, owner: &Address, house: &HouseInstance) -> u32 {
+    let cases = count_placed(env, owner, FurnitureCategory::Achievement);
+    (cases * SLOTS_PER_DISPLAY_CASE).min(max_display_slots(house.size))
+}
+
+/// Achievements currently on display.
+pub fn get_achievement_displays(env: &Env, owner: &Address) -> Vec<AchievementDisplay> {
+    env.storage()
+        .persistent()
+        .get(&HousingKey::Displays(owner.clone()))
+        .unwrap_or_else(|| Vec::new(env))
+}
+
+/// Put an unlocked achievement in a display case slot (replacing whatever was
+/// there). Slots come from placed Achievement-category furniture,
+/// [`SLOTS_PER_DISPLAY_CASE`] each, up to the house size's maximum.
+pub fn display_achievement(
     env: &Env,
     owner: Address,
     achievement_id: u64,
     slot: u32,
-) -> Result<u64, HousingError> {
+) -> Result<Vec<AchievementDisplay>, HousingError> {
     owner.require_auth();
-
-    if !env
-        .storage()
-        .persistent()
-        .has(&HousingKey::House(owner.clone()))
-    {
-        return Err(HousingError::HouseNotFound);
+    let house = require_house(env, &owner)?;
+    if slot >= display_slots(env, &owner, &house) {
+        return Err(HousingError::NoDisplayCase);
     }
-
-    if slot >= MAX_ACHIEVEMENT_DISPLAYS {
-        return Err(HousingError::InvalidSlot);
-    }
-
     let progress = achievements::query_progress(env, &owner, achievement_id)
-        .map_err(|_| HousingError::AchievementNotUnlocked)?;
+        .map_err(|_| HousingError::AchievementNotEarned)?;
     if !progress.unlocked {
-        return Err(HousingError::AchievementNotUnlocked);
+        return Err(HousingError::AchievementNotEarned);
     }
 
-    let mut displays: Vec<AchievementDisplay> = env
-        .storage()
-        .persistent()
-        .get(&HousingKey::AchievementDisplay(owner.clone()))
-        .unwrap_or_else(|| Vec::new(env));
-
-    if displays.len() >= MAX_ACHIEVEMENT_DISPLAYS {
-        return Err(HousingError::DisplayLimitReached);
-    }
-
-    for existing in displays.iter() {
-        if existing.achievement_id == achievement_id || existing.slot == slot {
-            return Err(HousingError::AlreadyDisplayed);
+    let mut displays = Vec::new(env);
+    for display in get_achievement_displays(env, &owner).iter() {
+        if display.slot != slot && display.achievement_id != achievement_id {
+            displays.push_back(display);
         }
     }
-
-    let display_id: u64 = env
-        .storage()
-        .persistent()
-        .get::<HousingKey, u64>(&HousingKey::DisplayCounter)
-        .unwrap_or(0)
-        .saturating_add(1);
-    env.storage()
-        .persistent()
-        .set(&HousingKey::DisplayCounter, &display_id);
-
     displays.push_back(AchievementDisplay {
-        display_id,
-        achievement_id,
         slot,
-        installed_at: env.ledger().timestamp(),
+        achievement_id,
+        displayed_at: env.ledger().timestamp(),
     });
     env.storage()
         .persistent()
-        .set(&HousingKey::AchievementDisplay(owner.clone()), &displays);
-
-    touch_house(env, &owner)?;
-
+        .set(&HousingKey::Displays(owner.clone()), &displays);
     env.events().publish(
-        (symbol_short!("housing"), symbol_short!("achdsp")),
-        (owner, display_id, achievement_id, slot),
+        (symbol_short!("housing"), symbol_short!("display")),
+        (owner, achievement_id, slot),
     );
-
-    Ok(display_id)
+    Ok(displays)
 }
 
-/// Remove an achievement display case from a house.
-pub fn remove_achievement_display(
-    env: &Env,
-    owner: Address,
-    display_id: u64,
-) -> Result<(), HousingError> {
+/// Empty a display slot.
+pub fn clear_achievement_display(env: &Env, owner: Address, slot: u32) -> Result<(), HousingError> {
     owner.require_auth();
-
-    let displays: Vec<AchievementDisplay> = env
-        .storage()
-        .persistent()
-        .get(&HousingKey::AchievementDisplay(owner.clone()))
-        .ok_or(HousingError::DisplayNotFound)?;
-
-    let mut remaining = Vec::new(env);
-    let mut found = false;
-    for display in displays.iter() {
-        if display.display_id == display_id && !found {
-            found = true;
-            continue;
+    require_house(env, &owner)?;
+    let mut displays = Vec::new(env);
+    for display in get_achievement_displays(env, &owner).iter() {
+        if display.slot != slot {
+            displays.push_back(display);
         }
-        remaining.push_back(display);
     }
-
-    if !found {
-        return Err(HousingError::DisplayNotFound);
-    }
-
     env.storage()
         .persistent()
-        .set(&HousingKey::AchievementDisplay(owner.clone()), &remaining);
-    touch_house(env, &owner)?;
-
-    env.events().publish(
-        (symbol_short!("housing"), symbol_short!("achrm")),
-        (owner, display_id),
-    );
-
+        .set(&HousingKey::Displays(owner), &displays);
     Ok(())
 }
 
-/// List all achievement display cases in a house.
-pub fn get_achievement_displays(env: &Env, owner: &Address) -> Vec<AchievementDisplay> {
-    env.storage()
-        .persistent()
-        .get(&HousingKey::AchievementDisplay(owner.clone()))
-        .unwrap_or_else(|| Vec::new(env))
-}
+// ─── Guild banners ────────────────────────────────────────────────────────────
 
-// ─── Guild Banners ────────────────────────────────────────────────────────────
-
-/// Display the owner's guild banner in their house.
-///
-/// The player must have a guild affiliation recorded in the leaderboards
-/// module; the banner mirrors that guild name so it cannot be forged.
-pub fn set_guild_banner(
-    env: &Env,
-    owner: Address,
-    motto: String,
-) -> Result<(), HousingError> {
+/// Hang the banner of the owner's guild (alliance).
+pub fn display_guild_banner(env: &Env, owner: Address) -> Result<GuildBanner, HousingError> {
     owner.require_auth();
-
-    if !env
-        .storage()
-        .persistent()
-        .has(&HousingKey::House(owner.clone()))
-    {
-        return Err(HousingError::HouseNotFound);
-    }
-
-    let guild_name =
-        crate::leaderboards::get_player_guild(env, &owner).ok_or(HousingError::NoGuildMembership)?;
-
+    require_house(env, &owner)?;
+    let alliance_id = alliance_manager::get_player_alliance(env, owner.clone())
+        .ok_or(HousingError::NotInGuild)?;
+    let alliance =
+        alliance_manager::get_alliance(env, alliance_id).map_err(|_| HousingError::NotInGuild)?;
     let banner = GuildBanner {
-        guild_name: guild_name.clone(),
-        motto,
-        installed_at: env.ledger().timestamp(),
+        alliance_id,
+        alliance_name: alliance.name,
+        displayed_at: env.ledger().timestamp(),
     };
     env.storage()
         .persistent()
-        .set(&HousingKey::GuildBanner(owner.clone()), &banner);
-    touch_house(env, &owner)?;
-
+        .set(&HousingKey::Banner(owner.clone()), &banner);
     env.events().publish(
-        (symbol_short!("housing"), symbol_short!("gldban")),
-        (owner, guild_name),
+        (symbol_short!("housing"), symbol_short!("banner")),
+        (owner, alliance_id),
     );
-
-    Ok(())
+    Ok(banner)
 }
 
-/// Remove the guild banner from a house.
-pub fn clear_guild_banner(env: &Env, owner: Address) -> Result<(), HousingError> {
+/// Take the guild banner down.
+pub fn remove_guild_banner(env: &Env, owner: Address) -> Result<(), HousingError> {
     owner.require_auth();
-
-    if !env
-        .storage()
-        .persistent()
-        .has(&HousingKey::GuildBanner(owner.clone()))
-    {
-        return Err(HousingError::NoGuildMembership);
-    }
-
+    require_house(env, &owner)?;
     env.storage()
         .persistent()
-        .remove(&HousingKey::GuildBanner(owner.clone()));
-    touch_house(env, &owner)?;
-
-    env.events().publish(
-        (symbol_short!("housing"), symbol_short!("gldrm")),
-        owner,
-    );
-
+        .remove(&HousingKey::Banner(owner));
     Ok(())
 }
 
-/// Get the guild banner displayed in a house, if any.
+/// The banner on display, hidden once the owner has left that guild.
 pub fn get_guild_banner(env: &Env, owner: &Address) -> Option<GuildBanner> {
+    let banner: GuildBanner = env
+        .storage()
+        .persistent()
+        .get(&HousingKey::Banner(owner.clone()))?;
+    if alliance_manager::get_player_alliance(env, owner.clone()) == Some(banner.alliance_id) {
+        Some(banner)
+    } else {
+        None
+    }
+}
+
+// ─── Guests & friends ─────────────────────────────────────────────────────────
+
+/// The friends-only guest list.
+pub fn get_guests(env: &Env, owner: &Address) -> Vec<Address> {
     env.storage()
         .persistent()
-        .get(&HousingKey::GuildBanner(owner.clone()))
+        .get(&HousingKey::Guests(owner.clone()))
+        .unwrap_or_else(|| Vec::new(env))
 }
 
-// ─── Storage Expansion ────────────────────────────────────────────────────────
-
-/// Cost of expanding to `level` (quadratic: `STORAGE_BASE_COST * level^2`).
-fn storage_upgrade_cost(level: u32) -> u64 {
-    (STORAGE_BASE_COST as u128)
-        .saturating_mul(level as u128)
-        .saturating_mul(level as u128)
-        .min(u64::MAX as u128) as u64
-}
-
-/// Expand a house's storage capacity by one level.
-///
-/// Each level grants [`STORAGE_CAPACITY_PER_LEVEL`] extra item slots. Storage
-/// bonus slots are also usable as extra furniture placements (capped by the
-/// global furniture bound).
-pub fn expand_storage(env: &Env, owner: Address) -> Result<HouseStorage, HousingError> {
+/// Allow a player into a friends-only house.
+pub fn add_guest(env: &Env, owner: Address, guest: Address) -> Result<(), HousingError> {
     owner.require_auth();
-
-    if !env
-        .storage()
-        .persistent()
-        .has(&HousingKey::House(owner.clone()))
-    {
-        return Err(HousingError::HouseNotFound);
+    require_house(env, &owner)?;
+    let mut guests = get_guests(env, &owner);
+    if guests.contains(&guest) {
+        return Ok(());
     }
-
-    let mut record: HouseStorage = env
-        .storage()
-        .persistent()
-        .get(&HousingKey::Storage(owner.clone()))
-        .unwrap_or_else(|| HouseStorage {
-            owner: owner.clone(),
-            level: 0,
-            base_capacity: BASE_STORAGE_CAPACITY,
-            bonus_capacity: 0,
-            last_expanded_at: env.ledger().timestamp(),
-        });
-
-    if record.level >= MAX_STORAGE_LEVEL {
-        return Err(HousingError::StorageMaxLevelReached);
+    if guests.len() >= MAX_GUESTS {
+        return Err(HousingError::GuestListFull);
     }
-
-    let next_level = record.level.saturating_add(1);
-    let cost = storage_upgrade_cost(next_level);
-    resource_minter::debit_balance(env, &owner, &ResourceType::StellarDust, cost)
-        .map_err(|_| HousingError::InsufficientResources)?;
-
-    record.level = next_level;
-    record.bonus_capacity = STORAGE_CAPACITY_PER_LEVEL.saturating_mul(next_level);
-    record.last_expanded_at = env.ledger().timestamp();
-
+    guests.push_back(guest.clone());
     env.storage()
         .persistent()
-        .set(&HousingKey::Storage(owner.clone()), &record);
-    touch_house(env, &owner)?;
-
+        .set(&HousingKey::Guests(owner.clone()), &guests);
     env.events().publish(
-        (symbol_short!("housing"), symbol_short!("stexp")),
-        (owner, next_level, record.bonus_capacity, cost),
+        (symbol_short!("housing"), symbol_short!("guest")),
+        (owner, guest, true),
     );
-
-    Ok(record)
+    Ok(())
 }
 
-/// Get the full storage expansion record for a house.
-pub fn get_house_storage(env: &Env, owner: &Address) -> Option<HouseStorage> {
+/// Remove a player from the guest list.
+pub fn remove_guest(env: &Env, owner: Address, guest: Address) -> Result<(), HousingError> {
+    owner.require_auth();
+    require_house(env, &owner)?;
+    let mut kept = Vec::new(env);
+    for g in get_guests(env, &owner).iter() {
+        if g != guest {
+            kept.push_back(g);
+        }
+    }
     env.storage()
         .persistent()
-        .get(&HousingKey::Storage(owner.clone()))
+        .set(&HousingKey::Guests(owner.clone()), &kept);
+    env.events().publish(
+        (symbol_short!("housing"), symbol_short!("guest")),
+        (owner, guest, false),
+    );
+    Ok(())
 }
 
-/// Get the total item capacity of a house (base + expansion bonus).
-pub fn get_storage_capacity(env: &Env, owner: &Address) -> u32 {
-    env.storage()
-        .persistent()
-        .get::<HousingKey, HouseStorage>(&HousingKey::Storage(owner.clone()))
-        .map_or(BASE_STORAGE_CAPACITY, |s| {
-            s.base_capacity.saturating_add(s.bonus_capacity)
-        })
+/// A visitor counts as a friend if they are the owner, on the guest list, or
+/// in the same guild as the owner.
+pub fn is_friend(env: &Env, owner: &Address, visitor: &Address) -> bool {
+    if owner == visitor || get_guests(env, owner).contains(visitor) {
+        return true;
+    }
+    match alliance_manager::get_player_alliance(env, owner.clone()) {
+        Some(alliance) => {
+            alliance_manager::get_player_alliance(env, visitor.clone()) == Some(alliance)
+        }
+        None => false,
+    }
+}
+
+/// House, furniture layout, achievement displays, banner and storage in one read.
+pub fn get_house_showcase(env: &Env, owner: &Address) -> Option<HouseShowcase> {
+    let house = get_house(env, owner)?;
+    let storage = storage_summary(env, owner, &house);
+    Some(HouseShowcase {
+        placements: get_placements(env, owner),
+        displays: get_achievement_displays(env, owner),
+        banner: get_guild_banner(env, owner)
+            .map_or_else(|| Vec::new(env), |b| Vec::from_array(env, [b])),
+        storage,
+        house,
+    })
 }
 
 // ─── Queries ──────────────────────────────────────────────────────────────────
@@ -1283,6 +1421,75 @@ pub fn get_featured_houses(env: &Env, tier: Symbol) -> Vec<Address> {
         .persistent()
         .get(&HousingKey::Discovery(tier))
         .unwrap_or_else(|| Vec::new(env))
+}
+
+// ─── PR #636 compatibility API ───────────────────────────────────────────────
+// Thin adapters that preserve the earlier branch's public symbols while
+// delegating to the canonical upstream (#629) implementation above.
+
+/// Legacy alias for [`display_achievement`]. Returns the slot used.
+pub fn install_achievement_display(
+    env: &Env,
+    owner: Address,
+    achievement_id: u64,
+    slot: u32,
+) -> Result<u64, HousingError> {
+    display_achievement(env, owner, achievement_id, slot)?;
+    Ok(u64::from(slot))
+}
+
+/// Legacy alias for [`clear_achievement_display`]. The legacy `display_id`
+/// is interpreted as the canonical display slot index.
+pub fn remove_achievement_display(
+    env: &Env,
+    owner: Address,
+    display_id: u64,
+) -> Result<(), HousingError> {
+    let slot = u32::try_from(display_id).map_err(|_| HousingError::NoDisplayCase)?;
+    clear_achievement_display(env, owner, slot)
+}
+
+/// Hang the guild banner and store the legacy motto separately. The banner
+/// itself remains the canonical alliance-derived [`GuildBanner`].
+pub fn set_guild_banner(env: &Env, owner: Address, motto: String) -> Result<(), HousingError> {
+    display_guild_banner(env, owner.clone())?;
+    env.storage()
+        .persistent()
+        .set(&HousingKey::GuildMotto(owner), &motto);
+    Ok(())
+}
+
+/// Legacy alias for [`remove_guild_banner`], also clearing the stored motto.
+pub fn clear_guild_banner(env: &Env, owner: Address) -> Result<(), HousingError> {
+    remove_guild_banner(env, owner.clone())?;
+    env.storage()
+        .persistent()
+        .remove(&HousingKey::GuildMotto(owner));
+    Ok(())
+}
+
+/// Legacy view of storage state, derived from [`get_storage`].
+pub fn get_house_storage(env: &Env, owner: &Address) -> Option<HouseStorage> {
+    let house: HouseInstance = env
+        .storage()
+        .persistent()
+        .get(&HousingKey::House(owner.clone()))?;
+    let summary = storage_summary(env, owner, &house);
+    let base = base_storage(house.size);
+    Some(HouseStorage {
+        owner: owner.clone(),
+        level: summary.expansions,
+        base_capacity: base,
+        bonus_capacity: summary.capacity.saturating_sub(base),
+        last_expanded_at: env.ledger().timestamp(),
+    })
+}
+
+/// Legacy total-capacity accessor.
+pub fn get_storage_capacity(env: &Env, owner: &Address) -> u32 {
+    get_storage(env, owner)
+        .map(|summary| summary.capacity)
+        .unwrap_or(0)
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1540,6 +1747,7 @@ mod tests {
     fn test_cannot_rate_twice() {
         let f = fixture();
         f.run(|| super::initialize_house(&f.env, f.player1.clone()).unwrap());
+        f.run(|| super::visit_house(&f.env, f.player2.clone(), f.player1.clone()).unwrap());
         f.run(|| super::rate_house(&f.env, f.player2.clone(), f.player1.clone(), 400).unwrap());
         f.run(|| {
             assert_eq!(
@@ -1605,276 +1813,334 @@ mod tests {
         });
     }
 
-    /// Mark an achievement as unlocked for a player in test storage.
-    fn unlock_achievement(f: &Fixture, player: &Address, achievement_id: u64) {
-        let player = player.clone();
+    // ─── #629 completion ──────────────────────────────────────────────────────
+
+    fn furniture(f: &Fixture, category: FurnitureCategory, cost: u64) -> u64 {
         f.run(|| {
-            f.env.storage().persistent().set(
-                &crate::achievement_engine::AchievementKey::PlayerAchievement(
-                    player,
-                    achievement_id,
-                ),
-                &f.env.ledger().timestamp(),
-            );
-        });
-    }
-
-    #[test]
-    fn test_install_and_list_achievement_display() {
-        let f = fixture();
-        f.run(|| {
-            super::initialize_house(&f.env, f.player1.clone()).unwrap();
-            unlock_achievement(&f, &f.player1, 1);
-        });
-
-        let display_id =
-            f.run(|| super::install_achievement_display(&f.env, f.player1.clone(), 1, 3).unwrap());
-        assert_eq!(display_id, 1);
-
-        f.run(|| {
-            let displays = super::get_achievement_displays(&f.env, &f.player1);
-            assert_eq!(displays.len(), 1);
-            let display = displays.get(0).unwrap();
-            assert_eq!(display.achievement_id, 1);
-            assert_eq!(display.slot, 3);
-            assert_eq!(display.display_id, 1);
-        });
-    }
-
-    #[test]
-    fn test_achievement_display_requires_unlock() {
-        let f = fixture();
-        f.run(|| super::initialize_house(&f.env, f.player1.clone()).unwrap());
-
-        f.run(|| {
-            assert_eq!(
-                super::install_achievement_display(&f.env, f.player1.clone(), 1, 0),
-                Err(HousingError::AchievementNotUnlocked)
-            );
-        });
-    }
-
-    #[test]
-    fn test_achievement_display_rejects_duplicate_achievement_or_slot() {
-        let f = fixture();
-        f.run(|| super::initialize_house(&f.env, f.player1.clone()).unwrap());
-        unlock_achievement(&f, &f.player1, 1);
-        unlock_achievement(&f, &f.player1, 2);
-
-        f.run(|| {
-            super::install_achievement_display(&f.env, f.player1.clone(), 1, 2).unwrap();
-        });
-        // Same achievement, different slot
-        f.run(|| {
-            assert_eq!(
-                super::install_achievement_display(&f.env, f.player1.clone(), 1, 4),
-                Err(HousingError::AlreadyDisplayed)
-            );
-        });
-        // Different achievement, same slot
-        f.run(|| {
-            assert_eq!(
-                super::install_achievement_display(&f.env, f.player1.clone(), 2, 2),
-                Err(HousingError::AlreadyDisplayed)
-            );
-        });
-    }
-
-    #[test]
-    fn test_achievement_display_slot_bounds() {
-        let f = fixture();
-        f.run(|| super::initialize_house(&f.env, f.player1.clone()).unwrap());
-        unlock_achievement(&f, &f.player1, 1);
-        f.run(|| {
-            assert_eq!(
-                super::install_achievement_display(
-                    &f.env,
-                    f.player1.clone(),
-                    1,
-                    MAX_ACHIEVEMENT_DISPLAYS
-                ),
-                Err(HousingError::InvalidSlot)
-            );
-        });
-    }
-
-    #[test]
-    fn test_remove_achievement_display() {
-        let f = fixture();
-        f.run(|| {
-            super::initialize_house(&f.env, f.player1.clone()).unwrap();
-            unlock_achievement(&f, &f.player1, 1);
-        });
-        let id = f.run(|| super::install_achievement_display(&f.env, f.player1.clone(), 1, 1).unwrap());
-
-        f.run(|| super::remove_achievement_display(&f.env, f.player1.clone(), id).unwrap());
-        f.run(|| {
-            assert!(super::get_achievement_displays(&f.env, &f.player1).is_empty());
-            assert_eq!(
-                super::remove_achievement_display(&f.env, f.player1.clone(), id),
-                Err(HousingError::DisplayNotFound)
-            );
-        });
-    }
-
-    #[test]
-    fn test_guild_banner_requires_membership_and_can_be_cleared() {
-        let f = fixture();
-        f.run(|| super::initialize_house(&f.env, f.player1.clone()).unwrap());
-
-        f.run(|| {
-            assert_eq!(
-                super::set_guild_banner(
-                    &f.env,
-                    f.player1.clone(),
-                    String::from_str(&f.env, "No guild")
-                ),
-                Err(HousingError::NoGuildMembership)
-            );
-        });
-
-        f.run(|| {
-            crate::leaderboards::set_player_guild(
-                &f.env,
-                &f.player1,
-                String::from_str(&f.env, "Nebula Guild"),
-            )
-            .unwrap();
-        });
-
-        f.run(|| {
-            super::set_guild_banner(
-                &f.env,
-                f.player1.clone(),
-                String::from_str(&f.env, "Explore far"),
-            )
-            .unwrap();
-        });
-
-        f.run(|| {
-            let banner = super::get_guild_banner(&f.env, &f.player1).unwrap();
-            assert_eq!(banner.guild_name, String::from_str(&f.env, "Nebula Guild"));
-            assert_eq!(banner.motto, String::from_str(&f.env, "Explore far"));
-        });
-
-        f.run(|| super::clear_guild_banner(&f.env, f.player1.clone()).unwrap());
-        f.run(|| assert!(super::get_guild_banner(&f.env, &f.player1).is_none()));
-    }
-
-    #[test]
-    fn test_storage_expansion_increases_capacity() {
-        let f = fixture();
-        f.run(|| {
-            super::initialize_house(&f.env, f.player1.clone()).unwrap();
-            resource_minter::credit_balance(
-                &f.env,
-                &f.player1,
-                &ResourceType::StellarDust,
-                100_000,
-            )
-            .unwrap();
-        });
-
-        assert_eq!(
-            f.run(|| super::get_storage_capacity(&f.env, &f.player1)),
-            BASE_STORAGE_CAPACITY
-        );
-
-        let record = f.run(|| super::expand_storage(&f.env, f.player1.clone()).unwrap());
-        assert_eq!(record.level, 1);
-        assert_eq!(record.bonus_capacity, STORAGE_CAPACITY_PER_LEVEL);
-        assert_eq!(
-            f.run(|| super::get_storage_capacity(&f.env, &f.player1)),
-            BASE_STORAGE_CAPACITY + STORAGE_CAPACITY_PER_LEVEL
-        );
-    }
-
-    #[test]
-    fn test_storage_expansion_respects_max_level() {
-        let f = fixture();
-        f.run(|| {
-            super::initialize_house(&f.env, f.player1.clone()).unwrap();
-            resource_minter::credit_balance(
-                &f.env,
-                &f.player1,
-                &ResourceType::StellarDust,
-                1_000_000,
-            )
-            .unwrap();
-        });
-        for _ in 0..MAX_STORAGE_LEVEL {
-            f.run(|| super::expand_storage(&f.env, f.player1.clone()).unwrap());
-        }
-        f.run(|| {
-            assert_eq!(
-                super::expand_storage(&f.env, f.player1.clone()),
-                Err(HousingError::StorageMaxLevelReached)
-            );
-        });
-        assert_eq!(
-            f.run(|| super::get_house_storage(&f.env, &f.player1).unwrap().level),
-            MAX_STORAGE_LEVEL
-        );
-    }
-
-    #[test]
-    fn test_storage_expansion_requires_resources() {
-        let f = fixture();
-        f.run(|| super::initialize_house(&f.env, f.player1.clone()).unwrap());
-        f.run(|| {
-            assert_eq!(
-                super::expand_storage(&f.env, f.player1.clone()),
-                Err(HousingError::InsufficientResources)
-            );
-        });
-    }
-
-    #[test]
-    fn test_storage_bonus_grants_extra_furniture_slots() {
-        let f = fixture();
-        f.run(|| {
-            super::initialize_house(&f.env, f.player1.clone()).unwrap();
-            resource_minter::credit_balance(
-                &f.env,
-                &f.player1,
-                &ResourceType::StellarDust,
-                100_000,
-            )
-            .unwrap();
-        });
-        f.run(|| super::expand_storage(&f.env, f.player1.clone()).unwrap());
-
-        let furniture_id = f.run(|| {
             super::define_furniture(
                 &f.env,
                 f.admin.clone(),
-                String::from_str(&f.env, "Cheap Stool"),
-                FurnitureCategory::Seating,
+                String::from_str(&f.env, "Item"),
+                category,
                 FurnitureRarity::Common,
                 ResourceType::StellarDust,
-                1,
+                cost,
                 false,
                 String::from_str(&f.env, ""),
                 false,
             )
             .unwrap()
-        });
+        })
+    }
 
-        // A Small house normally allows 50 items; with one expansion the
-        // bonus capacity raises the effective limit to 150.
-        for i in 0..55u32 {
-            let x = i % 1000;
-            f.run(|| {
-                super::purchase_furniture(&f.env, f.player1.clone(), furniture_id).unwrap()
-            });
-            f.run(|| {
-                super::place_furniture(&f.env, f.player1.clone(), furniture_id, x, 10, 0, 1)
-                    .unwrap()
-            });
+    fn fund(f: &Fixture, who: &Address, amount: u64) {
+        f.run(|| {
+            resource_minter::credit_balance(&f.env, who, &ResourceType::StellarDust, amount)
+                .unwrap()
+        });
+    }
+
+    fn house_for(f: &Fixture, who: &Address) {
+        f.run(|| super::initialize_house(&f.env, who.clone()).unwrap());
+    }
+
+    #[test]
+    fn test_theme_ids_are_limited_by_house_size() {
+        let f = fixture();
+        house_for(&f, &f.player1);
+        f.run(|| super::customize_theme(&f.env, f.player1.clone(), 5, 1, 2).unwrap());
+        f.run(|| {
+            assert_eq!(
+                super::customize_theme(&f.env, f.player1.clone(), 6, 1, 1),
+                Err(HousingError::InvalidTheme)
+            );
+        });
+        f.run(|| {
+            assert_eq!(
+                super::customize_theme(&f.env, f.player1.clone(), 1, 0, 1),
+                Err(HousingError::InvalidTheme)
+            );
+        });
+        fund(&f, &f.player1, 5_000);
+        f.run(|| super::upgrade_house(&f.env, f.player1.clone()).unwrap());
+        f.run(|| super::customize_theme(&f.env, f.player1.clone(), 10, 10, 10).unwrap());
+    }
+
+    #[test]
+    fn test_furniture_must_be_owned_to_place_and_returns_to_inventory() {
+        let f = fixture();
+        house_for(&f, &f.player1);
+        let lamp = furniture(&f, FurnitureCategory::Lighting, 10);
+        fund(&f, &f.player1, 1_000);
+        f.run(|| {
+            assert_eq!(
+                super::place_furniture(&f.env, f.player1.clone(), lamp, 1, 1, 0, 0),
+                Err(HousingError::NotOwned)
+            );
+        });
+        f.run(|| super::purchase_furniture(&f.env, f.player1.clone(), lamp).unwrap());
+        f.run(|| super::purchase_furniture(&f.env, f.player1.clone(), lamp).unwrap());
+        assert_eq!(
+            f.run(|| super::get_inventory(&f.env, &f.player1).get(lamp)),
+            Some(2)
+        );
+        f.run(|| super::place_furniture(&f.env, f.player1.clone(), lamp, 1, 1, 0, 0).unwrap());
+        f.run(|| {
+            assert_eq!(
+                super::place_furniture(&f.env, f.player1.clone(), lamp, 1, 1, 0, 0),
+                Err(HousingError::PositionOccupied)
+            );
+        });
+        f.run(|| super::place_furniture(&f.env, f.player1.clone(), lamp, 1, 1, 0, 1).unwrap());
+        assert_eq!(
+            f.run(|| super::get_inventory(&f.env, &f.player1).get(lamp)),
+            None
+        );
+        f.run(|| super::remove_furniture(&f.env, f.player1.clone(), lamp).unwrap());
+        assert_eq!(
+            f.run(|| super::get_inventory(&f.env, &f.player1).get(lamp)),
+            Some(1)
+        );
+    }
+
+    #[test]
+    fn test_storage_capacity_and_expansion() {
+        let f = fixture();
+        house_for(&f, &f.player1);
+        let crate_item = furniture(&f, FurnitureCategory::Decoration, 1);
+        let chest = furniture(&f, FurnitureCategory::Storage, 1);
+        fund(&f, &f.player1, 100_000);
+        let start = f.run(|| super::get_storage(&f.env, &f.player1).unwrap());
+        assert_eq!((start.capacity, start.used, start.expansions), (10, 0, 0));
+        assert_eq!(start.next_expansion_cost, STORAGE_EXPANSION_BASE_COST);
+        for _ in 0..10 {
+            f.run(|| super::purchase_furniture(&f.env, f.player1.clone(), crate_item).unwrap());
         }
         f.run(|| {
-            let house = super::get_house(&f.env, &f.player1).unwrap();
-            assert_eq!(house.furniture_count, 55);
+            assert_eq!(
+                super::purchase_furniture(&f.env, f.player1.clone(), crate_item),
+                Err(HousingError::StorageFull)
+            );
         });
+        let dust_before =
+            f.run(|| resource_minter::balance_of(&f.env, &f.player1, &ResourceType::StellarDust));
+        let expanded = f.run(|| super::expand_storage(&f.env, f.player1.clone()).unwrap());
+        assert_eq!(expanded.capacity, 20);
+        assert_eq!(
+            expanded.next_expansion_cost,
+            2 * STORAGE_EXPANSION_BASE_COST
+        );
+        let dust_after =
+            f.run(|| resource_minter::balance_of(&f.env, &f.player1, &ResourceType::StellarDust));
+        assert_eq!(dust_before - dust_after, STORAGE_EXPANSION_BASE_COST);
+
+        f.run(|| super::purchase_furniture(&f.env, f.player1.clone(), chest).unwrap());
+        f.run(|| super::place_furniture(&f.env, f.player1.clone(), chest, 5, 5, 0, 0).unwrap());
+        let with_chest = f.run(|| super::get_storage(&f.env, &f.player1).unwrap());
+        assert_eq!(with_chest.capacity, 20 + STORAGE_PER_STORAGE_ITEM);
+        assert_eq!(with_chest.used, 10);
+
+        for _ in 1..MAX_STORAGE_EXPANSIONS {
+            f.run(|| super::expand_storage(&f.env, f.player1.clone()).unwrap());
+        }
+        f.run(|| {
+            assert_eq!(
+                super::expand_storage(&f.env, f.player1.clone()),
+                Err(HousingError::StorageMaxed)
+            );
+        });
+    }
+
+    #[test]
+    fn test_achievement_display_cases() {
+        let f = fixture();
+        house_for(&f, &f.player1);
+        let case = furniture(&f, FurnitureCategory::Achievement, 1);
+        fund(&f, &f.player1, 1_000);
+        f.run(|| {
+            assert_eq!(
+                super::display_achievement(&f.env, f.player1.clone(), 1, 0),
+                Err(HousingError::NoDisplayCase)
+            );
+        });
+        f.run(|| super::purchase_furniture(&f.env, f.player1.clone(), case).unwrap());
+        f.run(|| super::place_furniture(&f.env, f.player1.clone(), case, 9, 9, 0, 0).unwrap());
+        f.run(|| {
+            assert_eq!(
+                super::display_achievement(&f.env, f.player1.clone(), 1, 0),
+                Err(HousingError::AchievementNotEarned)
+            );
+        });
+
+        // Unlock achievements 1 and 2 the way the achievement engine records them.
+        f.run(|| {
+            for id in [1u64, 2] {
+                f.env.storage().persistent().set(
+                    &crate::achievement_engine::AchievementKey::PlayerAchievement(
+                        f.player1.clone(),
+                        id,
+                    ),
+                    &100u64,
+                );
+            }
+        });
+        f.run(|| super::display_achievement(&f.env, f.player1.clone(), 1, 0).unwrap());
+        let shown = f.run(|| super::display_achievement(&f.env, f.player1.clone(), 2, 0).unwrap());
+        assert_eq!(shown.len(), 1, "a slot holds one achievement");
+        assert_eq!(shown.get(0).unwrap().achievement_id, 2);
+        f.run(|| {
+            assert_eq!(
+                super::display_achievement(&f.env, f.player1.clone(), 1, SLOTS_PER_DISPLAY_CASE),
+                Err(HousingError::NoDisplayCase)
+            );
+        });
+        f.run(|| super::display_achievement(&f.env, f.player1.clone(), 1, 2).unwrap());
+        assert_eq!(
+            f.run(|| super::get_achievement_displays(&f.env, &f.player1))
+                .len(),
+            2
+        );
+
+        f.run(|| super::remove_furniture(&f.env, f.player1.clone(), case).unwrap());
+        assert_eq!(
+            f.run(|| super::get_achievement_displays(&f.env, &f.player1))
+                .len(),
+            0
+        );
+    }
+
+    #[test]
+    fn test_guild_banner_follows_membership() {
+        let f = fixture();
+        house_for(&f, &f.player1);
+        f.run(|| {
+            assert_eq!(
+                super::display_guild_banner(&f.env, f.player1.clone()),
+                Err(HousingError::NotInGuild)
+            );
+        });
+        let guild = f.run(|| {
+            alliance_manager::found_alliance(
+                &f.env,
+                f.player1.clone(),
+                String::from_str(&f.env, "Nomads"),
+            )
+            .unwrap()
+        });
+        let banner = f.run(|| super::display_guild_banner(&f.env, f.player1.clone()).unwrap());
+        assert_eq!(banner.alliance_id, guild);
+        assert_eq!(banner.alliance_name, String::from_str(&f.env, "Nomads"));
+        assert_eq!(
+            f.run(|| super::get_guild_banner(&f.env, &f.player1)),
+            Some(banner)
+        );
+        f.run(|| alliance_manager::leave_alliance(&f.env, f.player1.clone()).unwrap());
+        assert_eq!(f.run(|| super::get_guild_banner(&f.env, &f.player1)), None);
+    }
+
+    #[test]
+    fn test_friends_only_admits_guests_and_guildmates() {
+        let f = fixture();
+        house_for(&f, &f.player1);
+        f.run(|| {
+            super::set_house_access(&f.env, f.player1.clone(), HouseAccess::FriendsOnly).unwrap()
+        });
+        let stranger = Address::generate(&f.env);
+        f.run(|| {
+            assert_eq!(
+                super::visit_house(&f.env, stranger.clone(), f.player1.clone()),
+                Err(HousingError::AccessDenied)
+            );
+        });
+        f.run(|| super::add_guest(&f.env, f.player1.clone(), stranger.clone()).unwrap());
+        f.run(|| super::visit_house(&f.env, stranger.clone(), f.player1.clone()).unwrap());
+        f.run(|| super::remove_guest(&f.env, f.player1.clone(), stranger.clone()).unwrap());
+        f.run(|| {
+            assert_eq!(
+                super::visit_house(&f.env, stranger.clone(), f.player1.clone()),
+                Err(HousingError::AccessDenied)
+            );
+        });
+
+        let guild = f.run(|| {
+            alliance_manager::found_alliance(
+                &f.env,
+                f.player1.clone(),
+                String::from_str(&f.env, "Kin"),
+            )
+            .unwrap()
+        });
+        f.run(|| alliance_manager::join_alliance(&f.env, guild, f.player2.clone()).unwrap());
+        f.run(|| super::visit_house(&f.env, f.player2.clone(), f.player1.clone()).unwrap());
+    }
+
+    #[test]
+    fn test_visitor_log_keeps_latest_and_rating_needs_a_visit() {
+        let f = fixture();
+        house_for(&f, &f.player1);
+        f.run(|| {
+            assert_eq!(
+                super::rate_house(&f.env, f.player2.clone(), f.player1.clone(), 400),
+                Err(HousingError::MustVisitFirst)
+            );
+        });
+        let first = Address::generate(&f.env);
+        f.run(|| super::visit_house(&f.env, first.clone(), f.player1.clone()).unwrap());
+        for _ in 0..MAX_VISITOR_RECORDS {
+            let v = Address::generate(&f.env);
+            f.run(|| super::visit_house(&f.env, v.clone(), f.player1.clone()).unwrap());
+        }
+        let log = f.run(|| super::get_visitors(&f.env, &f.player1));
+        assert_eq!(log.len(), MAX_VISITOR_RECORDS);
+        assert!(
+            log.iter().all(|r| r.visitor != first),
+            "oldest visit dropped"
+        );
+        assert_eq!(
+            f.run(|| super::get_house(&f.env, &f.player1).unwrap())
+                .total_visits,
+            51
+        );
+
+        f.run(|| super::visit_house(&f.env, f.player2.clone(), f.player1.clone()).unwrap());
+        f.run(|| super::rate_house(&f.env, f.player2.clone(), f.player1.clone(), 500).unwrap());
+        let log = f.run(|| super::get_visitors(&f.env, &f.player1));
+        let last = log.get(log.len() - 1).unwrap();
+        assert_eq!(last.visitor, f.player2);
+        assert!(last.left_rating);
+    }
+
+    #[test]
+    fn test_showcase_collects_everything_a_visitor_sees() {
+        let f = fixture();
+        assert_eq!(
+            f.run(|| super::get_house_showcase(&f.env, &f.player1)),
+            None
+        );
+        house_for(&f, &f.player1);
+        let lamp = furniture(&f, FurnitureCategory::Lighting, 1);
+        fund(&f, &f.player1, 100);
+        f.run(|| super::purchase_furniture(&f.env, f.player1.clone(), lamp).unwrap());
+        f.run(|| super::purchase_furniture(&f.env, f.player1.clone(), lamp).unwrap());
+        f.run(|| super::place_furniture(&f.env, f.player1.clone(), lamp, 3, 4, 0, 0).unwrap());
+        f.run(|| {
+            alliance_manager::found_alliance(
+                &f.env,
+                f.player1.clone(),
+                String::from_str(&f.env, "Nomads"),
+            )
+            .unwrap()
+        });
+        f.run(|| super::display_guild_banner(&f.env, f.player1.clone()).unwrap());
+
+        let showcase = f.run(|| super::get_house_showcase(&f.env, &f.player1).unwrap());
+        assert_eq!(showcase.house.owner, f.player1);
+        assert_eq!(showcase.placements.len(), 1);
+        assert_eq!(showcase.storage.used, 1);
+        assert_eq!(showcase.banner.len(), 1);
+        assert_eq!(
+            showcase.banner.get(0).unwrap().alliance_name,
+            String::from_str(&f.env, "Nomads")
+        );
     }
 }

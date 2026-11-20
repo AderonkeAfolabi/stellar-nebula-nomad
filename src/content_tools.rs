@@ -89,6 +89,10 @@ pub enum ContentDataKey {
     PlatformRevenue,
     /// Revenue split configuration (creator_bps, platform_bps).
     RevenueSplitConfig,
+    /// Marketplace listing IDs owned by a seller.
+    SellerListings(Address),
+    /// Active marketplace listing for a content item.
+    ContentMarketplaceListing(u64),
 }
 
 // ── Data Types ────────────────────────────────────────────────────────────────
@@ -178,7 +182,9 @@ pub fn set_admin(env: &Env, admin: &Address) -> Result<(), ContentToolsError> {
 }
 
 fn get_admin(env: &Env) -> Option<Address> {
-    env.storage().persistent().get(&ContentDataKey::ContentAdmin)
+    env.storage()
+        .persistent()
+        .get(&ContentDataKey::ContentAdmin)
 }
 
 fn require_admin(env: &Env, caller: &Address) -> Result<(), ContentToolsError> {
@@ -275,6 +281,72 @@ pub fn create_content(
     );
 
     Ok(content_id)
+}
+
+/// Create a nebula definition. Thin typed wrapper over [`create_content`].
+pub fn create_nebula(
+    env: &Env,
+    creator: &Address,
+    name: String,
+    description: String,
+    data: Bytes,
+    is_public: bool,
+    tags: Vec<Symbol>,
+) -> Result<u64, ContentToolsError> {
+    create_content(
+        env,
+        creator,
+        name,
+        description,
+        Symbol::new(env, CONTENT_TYPE_NEBULA),
+        data,
+        is_public,
+        tags,
+    )
+}
+
+/// Create a mission definition. Thin typed wrapper over [`create_content`].
+pub fn create_mission(
+    env: &Env,
+    creator: &Address,
+    name: String,
+    description: String,
+    data: Bytes,
+    is_public: bool,
+    tags: Vec<Symbol>,
+) -> Result<u64, ContentToolsError> {
+    create_content(
+        env,
+        creator,
+        name,
+        description,
+        Symbol::new(env, CONTENT_TYPE_MISSION),
+        data,
+        is_public,
+        tags,
+    )
+}
+
+/// Create a community event definition. Thin typed wrapper over [`create_content`].
+pub fn create_event(
+    env: &Env,
+    creator: &Address,
+    name: String,
+    description: String,
+    data: Bytes,
+    is_public: bool,
+    tags: Vec<Symbol>,
+) -> Result<u64, ContentToolsError> {
+    create_content(
+        env,
+        creator,
+        name,
+        description,
+        Symbol::new(env, CONTENT_TYPE_EVENT),
+        data,
+        is_public,
+        tags,
+    )
 }
 
 pub fn update_content(
@@ -599,6 +671,25 @@ pub fn list_on_marketplace(
         return Err(ContentToolsError::UnderReview);
     }
 
+    // One active listing per content item, and a per-seller cap.
+    if env
+        .storage()
+        .persistent()
+        .has(&ContentDataKey::ContentMarketplaceListing(content_id))
+    {
+        return Err(ContentToolsError::ContentAlreadyExists);
+    }
+
+    let seller_key = ContentDataKey::SellerListings(seller.clone());
+    let seller_listings: Vec<u64> = env
+        .storage()
+        .persistent()
+        .get(&seller_key)
+        .unwrap_or_else(|| Vec::new(env));
+    if seller_listings.len() >= MAX_MARKETPLACE_LISTINGS {
+        return Err(ContentToolsError::ContentLimitReached);
+    }
+
     // Generate listing ID
     let listing_counter: u64 = env
         .storage()
@@ -622,6 +713,15 @@ pub fn list_on_marketplace(
     env.storage()
         .persistent()
         .set(&ContentDataKey::MarketplaceListing(listing_id), &listing);
+    env.storage().persistent().set(
+        &ContentDataKey::ContentMarketplaceListing(content_id),
+        &listing_id,
+    );
+    let mut updated_seller_listings = seller_listings;
+    updated_seller_listings.push_back(listing_id);
+    env.storage()
+        .persistent()
+        .set(&seller_key, &updated_seller_listings);
 
     env.events().publish(
         (symbol_short!("mp"), symbol_short!("listed")),
@@ -651,6 +751,25 @@ pub fn unlist_from_marketplace(
 
     listing.is_active = false;
     env.storage().persistent().set(&key, &listing);
+    env.storage()
+        .persistent()
+        .remove(&ContentDataKey::ContentMarketplaceListing(
+            listing.content_id,
+        ));
+
+    let seller_key = ContentDataKey::SellerListings(seller.clone());
+    let ids: Vec<u64> = env
+        .storage()
+        .persistent()
+        .get(&seller_key)
+        .unwrap_or_else(|| Vec::new(env));
+    let mut remaining = Vec::new(env);
+    for id in ids.iter() {
+        if id != listing_id {
+            remaining.push_back(id);
+        }
+    }
+    env.storage().persistent().set(&seller_key, &remaining);
 
     Ok(())
 }
@@ -664,6 +783,51 @@ pub fn get_marketplace_listing(
         .persistent()
         .get(&key)
         .ok_or(ContentToolsError::ContentNotFound)
+}
+
+/// Browse every currently active marketplace listing.
+pub fn get_active_marketplace_listings(env: &Env) -> Vec<MarketplaceListing> {
+    let counter: u64 = env
+        .storage()
+        .persistent()
+        .get(&ContentDataKey::MarketplaceCounter)
+        .unwrap_or(0);
+
+    let mut listings = Vec::new(env);
+    for id in 1..=counter {
+        if let Some(listing) = env
+            .storage()
+            .persistent()
+            .get::<ContentDataKey, MarketplaceListing>(
+                &ContentDataKey::MarketplaceListing(id),
+            )
+        {
+            if listing.is_active {
+                listings.push_back(listing);
+            }
+        }
+    }
+    listings
+}
+
+/// Search active marketplace listings by maximum price.
+pub fn search_marketplace(env: &Env, max_price: i128) -> Vec<MarketplaceListing> {
+    let all = get_active_marketplace_listings(env);
+    let mut matches = Vec::new(env);
+    for listing in all.iter() {
+        if listing.price <= max_price {
+            matches.push_back(listing);
+        }
+    }
+    matches
+}
+
+/// List all marketplace listing IDs created by a seller.
+pub fn get_seller_marketplace_listings(env: &Env, seller: &Address) -> Vec<u64> {
+    env.storage()
+        .persistent()
+        .get(&ContentDataKey::SellerListings(seller.clone()))
+        .unwrap_or_else(|| Vec::new(env))
 }
 
 // ── Revenue Sharing (Issue #192) ─────────────────────────────────────────────
@@ -895,81 +1059,80 @@ mod tests {
 
     fn make_env() -> (Env, soroban_sdk::Address) {
         let env = Env::default();
+        env.mock_all_auths();
         let id = env.register(Stub, ());
         (env, id)
     }
 
-    // // #[test]
-    fn test_create_content() {
-        let (env, _contract_id) = make_env();
-        let creator = Address::generate(&env);
-
-        env.as_contract(&_contract_id, || {
-            let tags = Vec::new(&env);
-            let content_id = create_content(
-                &env,
-                &creator,
-                String::from_str(&env, "Test Nebula"),
-                String::from_str(&env, "A test nebula"),
-                Symbol::new(&env, CONTENT_TYPE_NEBULA),
-                Bytes::new(&env),
-                true,
-                tags,
-            )
-            .unwrap();
-            assert!(content_id > 0);
-
-            let content = get_content(&env, content_id).unwrap();
-            assert_eq!(content.creator, creator);
-        });
+    /// Run `f` in its own contract frame: each `require_auth()` for a given
+    /// address may be satisfied only once per frame (SDK 22+).
+    fn at<T>(env: &Env, id: &soroban_sdk::Address, f: impl FnOnce() -> T) -> T {
+        env.as_contract(id, f)
     }
 
-    // // #[test]
+    fn new_content(env: &Env, id: &soroban_sdk::Address, creator: &Address, title: &str) -> u64 {
+        at(env, id, || {
+            create_content(
+                env,
+                creator,
+                String::from_str(env, title),
+                String::from_str(env, "A test nebula"),
+                Symbol::new(env, CONTENT_TYPE_NEBULA),
+                Bytes::new(env),
+                true,
+                Vec::new(env),
+            )
+            .unwrap()
+        })
+    }
+
+    #[test]
+    fn test_create_content() {
+        let (env, id) = make_env();
+        let creator = Address::generate(&env);
+
+        let content_id = new_content(&env, &id, &creator, "Test Nebula");
+        assert!(content_id > 0);
+
+        let content = at(&env, &id, || get_content(&env, content_id).unwrap());
+        assert_eq!(content.creator, creator);
+    }
+
+    #[test]
     fn test_vote_content() {
-        let (env, _contract_id) = make_env();
+        let (env, id) = make_env();
         let creator = Address::generate(&env);
         let voter = Address::generate(&env);
 
-        env.as_contract(&_contract_id, || {
-            let tags = Vec::new(&env);
-            let content_id = create_content(
-                &env,
-                &creator,
-                String::from_str(&env, "Test"),
-                String::from_str(&env, "Desc"),
-                Symbol::new(&env, CONTENT_TYPE_NEBULA),
-                Bytes::new(&env),
-                true,
-                tags,
-            )
-            .unwrap();
+        let content_id = new_content(&env, &id, &creator, "Test");
 
-            // Need admin to approve first
-            set_admin(&env, &creator).unwrap();
-            approve_content(&env, &creator, content_id).unwrap();
-
-            vote_content(&env, &voter, content_id, 5).unwrap();
-            let result = get_vote_result(&env, content_id);
-            assert_eq!(result.total_votes, 1);
+        // Need admin to approve first
+        at(&env, &id, || set_admin(&env, &creator).unwrap());
+        at(&env, &id, || {
+            approve_content(&env, &creator, content_id).unwrap()
         });
+
+        at(&env, &id, || {
+            vote_content(&env, &voter, content_id, 5).unwrap()
+        });
+        let result = at(&env, &id, || get_vote_result(&env, content_id));
+        assert_eq!(result.total_votes, 1);
     }
 
-    // // #[test]
+    #[test]
     fn test_set_admin_cannot_be_hijacked_after_init() {
         // Issue #237: set_admin previously let ANY caller overwrite the
         // admin at any time. Now it is a one-time initializer.
-        let (env, _contract_id) = make_env();
+        let (env, id) = make_env();
         let admin = Address::generate(&env);
         let attacker = Address::generate(&env);
 
-        env.as_contract(&_contract_id, || {
-            set_admin(&env, &admin).unwrap();
+        at(&env, &id, || set_admin(&env, &admin).unwrap());
 
-            let result = set_admin(&env, &attacker);
-            assert_eq!(result, Err(ContentToolsError::AlreadyInitialized));
+        let result = at(&env, &id, || set_admin(&env, &attacker));
+        assert_eq!(result, Err(ContentToolsError::AlreadyInitialized));
 
-            let result = approve_content(&env, &attacker, 1);
-            assert_eq!(result, Err(ContentToolsError::Unauthorized));
-        });
+        let result = at(&env, &id, || approve_content(&env, &attacker, 1));
+        assert_eq!(result, Err(ContentToolsError::Unauthorized));
     }
 }

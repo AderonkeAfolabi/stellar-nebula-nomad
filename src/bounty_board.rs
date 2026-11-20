@@ -92,7 +92,9 @@ pub fn initialize_bounty_board(env: &Env, admin: &Address) {
     env.storage()
         .instance()
         .set(&BountyKey::Expiry, &DEFAULT_BOUNTY_EXPIRY);
-    env.storage().instance().set(&BountyKey::BountyCounter, &0u64);
+    env.storage()
+        .instance()
+        .set(&BountyKey::BountyCounter, &0u64);
 }
 
 /// Set bounty expiry duration. Admin-only.
@@ -140,7 +142,9 @@ pub fn post_bounty(
     }
 
     let next_id = counter + 1;
-    env.storage().instance().set(&BountyKey::BountyCounter, &next_id);
+    env.storage()
+        .instance()
+        .set(&BountyKey::BountyCounter, &next_id);
 
     let expiry_seconds: u64 = env
         .storage()
@@ -266,6 +270,41 @@ pub fn dispute_bounty(env: &Env, poster: &Address, bounty_id: u64) -> Result<Bou
         .instance()
         .set(&BountyKey::Bounty(bounty_id), &bounty);
     Ok(bounty)
+}
+
+/// Cancels a bounty and releases its escrowed reward back to the poster.
+///
+/// Allowed while nobody has submitted proof, or once the bounty has expired
+/// without being approved. A claimed (approved) or disputed bounty cannot be
+/// cancelled. The record is removed and a `refunded` event carries the reward
+/// owed back to the poster. Returns the refunded amount.
+pub fn cancel_bounty(env: &Env, poster: &Address, bounty_id: u64) -> Result<i128, BountyError> {
+    poster.require_auth();
+    let bounty: Bounty = env
+        .storage()
+        .instance()
+        .get(&BountyKey::Bounty(bounty_id))
+        .ok_or(BountyError::BountyNotFound)?;
+    if bounty.poster != *poster {
+        return Err(BountyError::NotPoster);
+    }
+    if bounty.claimed || bounty.disputed {
+        return Err(BountyError::AlreadyClaimed);
+    }
+    let expired = env.ledger().timestamp() > bounty.expires_at;
+    if bounty.claimer.is_some() && !expired {
+        // Proof is waiting for review: approve or dispute it instead.
+        return Err(BountyError::AlreadyClaimed);
+    }
+
+    env.storage()
+        .instance()
+        .remove(&BountyKey::Bounty(bounty_id));
+    env.events().publish(
+        (symbol_short!("bounty"), symbol_short!("refunded")),
+        (poster.clone(), bounty_id, bounty.reward),
+    );
+    Ok(bounty.reward)
 }
 
 /// Get bounty by ID.

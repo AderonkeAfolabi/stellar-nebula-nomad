@@ -152,7 +152,9 @@ pub fn initialize(env: &Env, admin: &Address, initial_fund: i128) -> Result<(), 
         return Err(SponsorError::InvalidAmount);
     }
 
-    env.storage().instance().set(&DataKey::GasSponsorAdmin, admin);
+    env.storage()
+        .instance()
+        .set(&DataKey::GasSponsorAdmin, admin);
     env.storage()
         .instance()
         .set(&DataKey::FundBalance, &initial_fund);
@@ -472,7 +474,9 @@ pub fn update_config(
         per_user_daily_cap,
     };
 
-    env.storage().instance().set(&DataKey::GasSponsorConfig, &config);
+    env.storage()
+        .instance()
+        .set(&DataKey::GasSponsorConfig, &config);
 
     env.events().publish(
         (symbol_short!("sponsor"), symbol_short!("config")),
