@@ -186,6 +186,8 @@ mod gas_optimized_storage;
 mod ai_mission_engine;
 mod composability_examples;
 /// Cooperative guild quest tracking and reward distribution.
+/// Alliance treasury governance and guild quest reward payouts.
+pub mod guild_economy;
 pub mod guild_quests;
 pub mod input_validation;
 mod nomad_bonding;
@@ -387,6 +389,23 @@ pub use alliance_manager::{
     contribute_to_treasury, found_alliance, get_alliance, get_alliance_treasury,
     get_member_contribution, get_player_alliance, join_alliance, leave_alliance, Alliance,
     AllianceError, MembershipRecord, MAX_MEMBERS_PER_ALLIANCE,
+};
+pub use guild_economy::{
+    claim_quest_reward_share, get_quest_reward_payout, record_quest_rewards, GuildEconomyError,
+    GuildEconomyKey, QuestRewardPayout, QuestRewardSplit, TreasuryProposal,
+};
+pub use guild_quests::{
+    apply_reward_bps, assign_guild_quest, calculate_reward_split, clear_guild_quest_assignment,
+    contribute_quest_progress, create_guild_quest, create_guild_quest_chain,
+    create_guild_quest_with_config, get_active_guild_quests, get_guild_quest,
+    get_guild_quest_assignment, get_guild_quest_board, get_guild_quest_chain,
+    get_guild_quest_contributors, get_guild_quest_meta, is_chain_unlocked, rotate_guild_quests,
+    rotation_expires_at, rotation_period, rotation_period_secs, tier_reward_bps, GuildQuest,
+    GuildQuestChain, GuildQuestConfig, GuildQuestError, GuildQuestKey, GuildQuestMeta,
+    GuildQuestStatus, GuildQuestSummary, QuestAssignment, QuestFrequency,
+    GUILD_QUEST_BPS_DENOMINATOR, GUILD_QUEST_CHAIN_TERMINUS, GUILD_QUEST_DAY_SECS,
+    GUILD_QUEST_DEFAULT_TREASURY_BPS, GUILD_QUEST_LEGACY_TREASURY_BPS,
+    GUILD_QUEST_MAX_CHAIN_LENGTH, GUILD_QUEST_SEASON_SECS, GUILD_QUEST_WEEK_SECS,
 };
 pub use audio_seed_generator::{
     generate_music_seed, get_all_layers, get_instrument_layer, get_nebula_seed, get_preset,
@@ -3252,6 +3271,171 @@ impl NebulaNomadContract {
     /// Get player's current alliance ID.
     pub fn get_player_alliance(env: Env, player: Address) -> Option<u64> {
         alliance_manager::get_player_alliance(&env, player)
+    }
+
+    // ─── Cooperative Guild Quests (Issue #595) ────────────────────────────
+
+    /// Create a one-off guild quest with the legacy 100% treasury payout.
+    #[allow(clippy::too_many_arguments)]
+    pub fn create_guild_quest(
+        env: Env,
+        admin: Address,
+        alliance_id: u64,
+        quest_type: Symbol,
+        target_count: u64,
+        reward_essence: i128,
+        reward_xp: u64,
+        duration_secs: u64,
+    ) -> Result<u64, GuildQuestError> {
+        guild_quests::create_guild_quest(
+            &env,
+            admin,
+            alliance_id,
+            quest_type,
+            target_count,
+            reward_essence,
+            reward_xp,
+            duration_secs,
+        )
+    }
+
+    /// Create a guild quest with frequency, tier, chain and cooperative settings.
+    #[allow(clippy::too_many_arguments)]
+    pub fn create_guild_quest_with_config(
+        env: Env,
+        admin: Address,
+        alliance_id: u64,
+        quest_type: Symbol,
+        target_count: u64,
+        reward_essence: i128,
+        reward_xp: u64,
+        duration_secs: u64,
+        config: GuildQuestConfig,
+    ) -> Result<u64, GuildQuestError> {
+        guild_quests::create_guild_quest_with_config(
+            &env,
+            admin,
+            alliance_id,
+            quest_type,
+            target_count,
+            reward_essence,
+            reward_xp,
+            duration_secs,
+            config,
+        )
+    }
+
+    /// Define an ordered chain of guild quests.
+    pub fn create_guild_quest_chain(
+        env: Env,
+        admin: Address,
+        alliance_id: u64,
+        name: Symbol,
+    ) -> Result<u64, GuildQuestError> {
+        guild_quests::create_guild_quest_chain(&env, admin, alliance_id, name)
+    }
+
+    /// Restrict a quest to a roster of alliance members. An empty roster clears it.
+    pub fn assign_guild_quest(
+        env: Env,
+        admin: Address,
+        alliance_id: u64,
+        quest_id: u64,
+        assignees: Vec<Address>,
+    ) -> Result<(), GuildQuestError> {
+        guild_quests::assign_guild_quest(&env, admin, alliance_id, quest_id, assignees)
+    }
+
+    /// Make a quest open to every member again.
+    pub fn clear_guild_quest_assignment(
+        env: Env,
+        admin: Address,
+        alliance_id: u64,
+        quest_id: u64,
+    ) -> Result<(), GuildQuestError> {
+        guild_quests::clear_guild_quest_assignment(&env, admin, alliance_id, quest_id)
+    }
+
+    /// Contribute to every matching active quest in the caller's alliance.
+    pub fn contribute_guild_quest_progress(
+        env: Env,
+        player: Address,
+        quest_type: Symbol,
+        amount: u64,
+    ) -> Result<(), GuildQuestError> {
+        player.require_auth();
+        guild_quests::contribute_quest_progress(&env, player, quest_type, amount)
+    }
+
+    /// Spawn this period's daily/weekly/seasonal quest instances from templates.
+    pub fn rotate_guild_quests(
+        env: Env,
+        admin: Address,
+        alliance_id: u64,
+        template_ids: Vec<u64>,
+    ) -> Result<u64, GuildQuestError> {
+        guild_quests::rotate_guild_quests(&env, admin, alliance_id, template_ids)
+    }
+
+    /// Active guild quests for an alliance (rotation-aware).
+    pub fn get_active_guild_quests(env: Env, alliance_id: u64) -> Vec<GuildQuest> {
+        guild_quests::get_active_guild_quests(&env, alliance_id)
+    }
+
+    /// Status-rich quest list for the guild quest board UI.
+    pub fn get_guild_quest_board(env: Env, alliance_id: u64) -> Vec<GuildQuestSummary> {
+        guild_quests::get_guild_quest_board(&env, alliance_id)
+    }
+
+    /// Read one guild quest.
+    pub fn get_guild_quest(env: Env, alliance_id: u64, quest_id: u64) -> Option<GuildQuest> {
+        guild_quests::get_guild_quest(&env, alliance_id, quest_id)
+    }
+
+    /// Read a guild quest chain.
+    pub fn get_guild_quest_chain(
+        env: Env,
+        alliance_id: u64,
+        chain_id: u64,
+    ) -> Option<GuildQuestChain> {
+        guild_quests::get_guild_quest_chain(&env, alliance_id, chain_id)
+    }
+
+    /// Read a quest's assignment roster.
+    pub fn get_guild_quest_assignment(
+        env: Env,
+        alliance_id: u64,
+        quest_id: u64,
+    ) -> Option<QuestAssignment> {
+        guild_quests::get_guild_quest_assignment(&env, alliance_id, quest_id)
+    }
+
+    /// Read the members who contributed to a quest.
+    pub fn get_guild_quest_contributors(
+        env: Env,
+        alliance_id: u64,
+        quest_id: u64,
+    ) -> Vec<Address> {
+        guild_quests::get_guild_quest_contributors(&env, alliance_id, quest_id)
+    }
+
+    /// Read the guild economy payout recorded for a completed quest.
+    pub fn get_guild_quest_payout(
+        env: Env,
+        alliance_id: u64,
+        quest_id: u64,
+    ) -> Option<QuestRewardPayout> {
+        guild_economy::get_quest_reward_payout(&env, alliance_id, quest_id)
+    }
+
+    /// Claim a contributor's share of a completed guild quest.
+    pub fn claim_guild_quest_reward_share(
+        env: Env,
+        player: Address,
+        alliance_id: u64,
+        quest_id: u64,
+    ) -> Result<i128, GuildEconomyError> {
+        guild_economy::claim_quest_reward_share(&env, player, alliance_id, quest_id)
     }
 
     // ─── Dynamic Resource Market Oracle Integration (Issue #78) ──────────
