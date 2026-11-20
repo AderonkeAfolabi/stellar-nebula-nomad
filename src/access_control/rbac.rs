@@ -591,18 +591,3 @@ pub fn propose_role_change(
     Err(AccessControlError::NotImplemented)
 }
 
-// ═══════════════════════════════════════════════════════════════════════════════
-// MULTI-SIGNATURE ADMIN OPERATIONS
-// ═══════════════════════════════════════════════════════════════════════════════
-
-/// Initialize multi-signature configuration for admin operations.
-///
-/// # Parameters
-/// - `admin`: Current admin address (must authorize).
-/// - `signers`: List of authorized signers.
-/// - `required_approvals`: Number of approvals needed (M in M-of-N).
-/// - `timelock_period`: Seconds to wait before execution of critical operations.
-///
-/// # Errors
-/// - `AdminRequired` if caller is not admin.
-/// - `InvalidSignerConfig` if required_approvals > signers.len() or signers is empty.

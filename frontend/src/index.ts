@@ -8,6 +8,9 @@ export * from './utils/assets';
 export * from './utils/offline';
 export * from './contexts/WebSocketContext';
 export * from './views/AnalyticsDashboard';
+// Contract-style Housing UI (PR #636)
+export * from './views/Housing';
+// Showcase-style Housing UI (upstream #629)
 export * from './utils/weather';
 export * from './views/WeatherPanel';
 export * from './utils/wormholes';

@@ -182,3 +182,5 @@ pub fn init_role_templates(env: &Env, admin: Address) -> Result<(), AccessContro
         .persistent()
         .set(&AccessControlKey::RoleParent(operator), &readonly);
 
+    Ok(())
+}
