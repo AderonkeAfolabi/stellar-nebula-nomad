@@ -19,3 +19,7 @@ export * from './utils/constellations';
 export * from './views/ConstellationAtlas';
 export * from './utils/housing';
 export * from './views/HousingView';
+export * from './i18n';
+export * from './a11y';
+export * from './views/MarketOracleDashboard';
+export * from './views/TreasureVaultPanel';

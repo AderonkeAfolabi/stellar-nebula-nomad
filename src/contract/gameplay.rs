@@ -352,6 +352,34 @@
         treasure_vault::get_vault(&env, vault_id)
     }
 
+    /// Discover an unlocked vault and roll its loot (Issue #655).
+    pub fn discover_vault(
+        env: Env,
+        owner: Address,
+        vault_id: u64,
+    ) -> Result<VaultDiscovery, VaultError> {
+        treasure_vault::discover_vault(&env, &owner, vault_id)
+    }
+
+    /// Spend a vault key to claim a discovered vault's loot (Issue #655).
+    pub fn claim_vault_loot(
+        env: Env,
+        owner: Address,
+        vault_id: u64,
+    ) -> Result<LootReward, VaultError> {
+        treasure_vault::claim_vault_loot(&env, &owner, vault_id)
+    }
+
+    /// Read a vault's discovery (rolled loot), if any.
+    pub fn get_vault_discovery(env: Env, vault_id: u64) -> Option<VaultDiscovery> {
+        treasure_vault::get_vault_discovery(&env, vault_id)
+    }
+
+    /// Number of unspent vault keys an owner holds.
+    pub fn get_vault_key_balance(env: Env, owner: Address) -> u32 {
+        treasure_vault::get_key_balance(&env, &owner)
+    }
+
     // ─── Difficulty Scaling ───────────────────────────────────────────────
 
     /// Calculate difficulty scaling for a player level.
@@ -726,6 +754,12 @@
         raw_price: i128,
     ) -> Result<PriceState, PricingError> {
         dynamic_pricing::observe_price(&env, &source, resource, raw_price)
+    }
+
+    /// Feed the market oracle's fresh consensus price into the pricing
+    /// engine (permissionless keeper call, Issue #654).
+    pub fn observe_oracle_price(env: Env, resource: Symbol) -> Result<PriceState, PricingError> {
+        dynamic_pricing::observe_oracle_price(&env, resource)
     }
 
     /// Record the supply/demand balance for a resource. Admin-only.
