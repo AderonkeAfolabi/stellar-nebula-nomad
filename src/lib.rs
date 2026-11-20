@@ -127,6 +127,7 @@ mod yield_forecast;
 mod gas_sponsor;
 
 pub mod cache_ttl_manager;
+pub mod cache_layers;
 mod metrics_exporter;
 mod migration_framework;
 mod state_snapshot;

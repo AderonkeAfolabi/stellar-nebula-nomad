@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { responsiveImage } from '../utils/assets';
 import './Marketplace.css';
 
 export interface MarketplaceItem {
@@ -177,7 +178,14 @@ export const Marketplace: React.FC<MarketplaceProps> = ({
           {nftItems.map(item => (
             <div key={item.id} className="nft-card">
               <div className="nft-image">
-                {item.image && <img src={item.image} alt={item.name} />}
+                {item.image && (
+                  <img
+                    {...responsiveImage(item.image)}
+                    alt={item.name}
+                    width={640}
+                    height={480}
+                  />
+                )}
                 <div className="nft-overlay">
                   <span className="rarity">{item.rarity?.toUpperCase()}</span>
                 </div>
