@@ -785,3 +785,4 @@
     ) -> revenue_attribution::RevenueAnalyticsDashboard {
         revenue_attribution::get_revenue_dashboard(&env)
     }
+}

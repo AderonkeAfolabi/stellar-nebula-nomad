@@ -591,6 +591,3 @@ pub fn propose_role_change(
     Err(AccessControlError::NotImplemented)
 }
 
-// ═══════════════════════════════════════════════════════════════════════════════
-// MULTI-SIGNATURE ADMIN OPERATIONS (implemented in `multisig.rs`)
-// ═══════════════════════════════════════════════════════════════════════════════

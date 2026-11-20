@@ -15,11 +15,47 @@ LOG_FILE="${BACKUP_DIR}/backup.log"
 
 SCHEDULE=false
 TEST_RESTORE=false
+VERIFY_ONLY=false
+VERIFY_ARCHIVE=""
 
-for arg in "$@"; do
-    case "$arg" in
-        --schedule) SCHEDULE=true ;;
-        --test-restore) TEST_RESTORE=true ;;
+# Optional integration settings (safe defaults keep `set -e` happy)
+S3_BUCKET="${S3_BUCKET:-}"
+IPFS_UPLOAD="${IPFS_UPLOAD:-}"
+WEBHOOK_URL="${WEBHOOK_URL:-}"
+
+# Parse arguments. Unknown arguments are ignored for backward compatibility.
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --schedule)
+            SCHEDULE=true
+            shift
+            ;;
+        --test-restore)
+            TEST_RESTORE=true
+            shift
+            ;;
+        --verify-only)
+            VERIFY_ONLY=true
+            VERIFY_ARCHIVE="${2:-}"
+            if [ -z "$VERIFY_ARCHIVE" ]; then
+                echo "[ERROR] --verify-only requires an archive path" >&2
+                echo "Usage: $0 [--schedule] [--test-restore] [--verify-only <archive>]" >&2
+                exit 1
+            fi
+            shift 2
+            ;;
+        --verify-only=*)
+            VERIFY_ONLY=true
+            VERIFY_ARCHIVE="${1#*=}"
+            if [ -z "$VERIFY_ARCHIVE" ]; then
+                echo "[ERROR] --verify-only requires an archive path" >&2
+                exit 1
+            fi
+            shift
+            ;;
+        *)
+            shift
+            ;;
     esac
 done
 
@@ -324,33 +360,153 @@ cleanup_old_backups() {
     log_success "Cleanup complete. Remaining backups: $remaining"
 }
 
-# Verify backup integrity
+# Locate the backup root inside an extracted archive. Handles both the layout
+# produced by this script (single top-level backup directory) and flat archives.
+find_extracted_backup_root() {
+    local base="$1" checksum_file
+    checksum_file="$(find "$base" -type f -path '*/verification/checksums.txt' -print -quit 2>/dev/null || true)"
+    if [ -n "$checksum_file" ]; then
+        dirname "$(dirname "$checksum_file")"
+        return 0
+    fi
+    if [ -f "$base/metadata/contract_info.json" ]; then
+        printf '%s' "$base"
+        return 0
+    fi
+    return 1
+}
+
+# Verify backup integrity (used during a normal backup run).
 verify_backup() {
     log "Verifying backup integrity..."
-    
+
     local archive_file="$BACKUP_DIR/${BACKUP_NAME}.tar.gz"
-    
-    # Test archive integrity
-    tar -tzf "$archive_file" > /dev/null 2>&1 || {
+
+    if [ ! -f "$archive_file" ] || [ ! -r "$archive_file" ]; then
+        log_error "Backup archive is missing or unreadable: $archive_file"
+        return 1
+    fi
+
+    # Test gzip and tar integrity before extracting anything.
+    if ! gzip -t "$archive_file" > /dev/null 2>&1; then
+        log_error "Backup archive failed gzip integrity check!"
+        return 1
+    fi
+    if ! tar -tzf "$archive_file" > /dev/null 2>&1; then
         log_error "Backup archive is corrupted!"
         return 1
-    }
-    
-    # Extract and verify checksums
-    local temp_dir=$(mktemp -d)
-    tar -xzf "$archive_file" -C "$temp_dir"
-    
-    cd "$temp_dir/$BACKUP_NAME"
-    if ! sha256sum -c verification/checksums.txt; then
+    fi
+
+    local temp_dir root checksum_file
+    temp_dir="$(mktemp -d)"
+
+    if ! tar -xzf "$archive_file" -C "$temp_dir"; then
+        log_error "Failed to extract backup archive"
+        rm -rf "$temp_dir"
+        return 1
+    fi
+
+    if ! root="$(find_extracted_backup_root "$temp_dir")"; then
+        log_error "No verification/checksums.txt found in the backup archive"
+        rm -rf "$temp_dir"
+        return 1
+    fi
+
+    checksum_file="$root/verification/checksums.txt"
+    if [ ! -s "$checksum_file" ]; then
+        log_error "Checksum file is missing or empty: $checksum_file"
+        rm -rf "$temp_dir"
+        return 1
+    fi
+
+    # Run from the backup root so relative paths inside checksums.txt resolve.
+    if ! (cd "$root" && sha256sum -c verification/checksums.txt); then
         log_error "Checksum verification failed!"
         rm -rf "$temp_dir"
         return 1
     fi
-    cd - > /dev/null
-    
+
+    local required
+    for required in metadata/contract_info.json state/contract_state.json; do
+        if [ ! -s "$root/$required" ]; then
+            log_error "Required backup file missing or empty: $required"
+            rm -rf "$temp_dir"
+            return 1
+        fi
+    done
+
     rm -rf "$temp_dir"
-    
     log_success "Backup integrity verified"
+}
+
+# Verify an existing archive only (no backup is created). Used by CI.
+verify_only_mode() {
+    local archive="$1" report_dir temp_dir root checksum_file required
+
+    log "=========================================="
+    log "Verify-only mode: $archive"
+    log "=========================================="
+
+    if [ ! -f "$archive" ] || [ ! -r "$archive" ]; then
+        log_error "Backup archive is missing or unreadable: $archive"
+        return 1
+    fi
+
+    report_dir="$(cd "$(dirname "$archive")" && pwd)"
+
+    if [ -x "$SCRIPT_DIR/verify-backup.sh" ]; then
+        if bash "$SCRIPT_DIR/verify-backup.sh" \
+            --backup "$archive" --report-dir "$report_dir"; then
+            log_success "Backup verified. Reports written to $report_dir"
+            return 0
+        fi
+        log_error "Standalone verification failed for $archive"
+        return 1
+    fi
+
+    log_warning "verify-backup.sh not found or not executable; using built-in verification"
+    if ! gzip -t "$archive" > /dev/null 2>&1; then
+        log_error "Backup archive failed gzip integrity check!"
+        return 1
+    fi
+    if ! tar -tzf "$archive" > /dev/null 2>&1; then
+        log_error "Backup archive is corrupted!"
+        return 1
+    fi
+
+    temp_dir="$(mktemp -d)"
+    if ! tar -xzf "$archive" -C "$temp_dir"; then
+        log_error "Failed to extract backup archive"
+        rm -rf "$temp_dir"
+        return 1
+    fi
+    if ! root="$(find_extracted_backup_root "$temp_dir")"; then
+        log_error "No verification/checksums.txt found in the backup archive"
+        rm -rf "$temp_dir"
+        return 1
+    fi
+    checksum_file="$root/verification/checksums.txt"
+    if [ ! -s "$checksum_file" ]; then
+        log_error "Checksum file is missing or empty: $checksum_file"
+        rm -rf "$temp_dir"
+        return 1
+    fi
+    if ! (cd "$root" && sha256sum -c verification/checksums.txt); then
+        log_error "Checksum verification failed!"
+        rm -rf "$temp_dir"
+        return 1
+    fi
+    for required in metadata/contract_info.json state/contract_state.json; do
+        if [ ! -s "$root/$required" ]; then
+            log_error "Required backup file missing or empty: $required"
+            rm -rf "$temp_dir"
+            return 1
+        fi
+    done
+
+    rm -rf "$temp_dir"
+    log_success "Backup integrity verified (built-in verifier)"
+    return 0
 }
 
 # Send notification
@@ -384,6 +540,23 @@ main() {
     calculate_checksums
     compress_backup
     verify_backup
+
+    # Generate standalone validation reports (Markdown, JSON, Prometheus metrics).
+    # Backward compatible: backup still succeeds if the verifier is absent.
+    if [ -x "$SCRIPT_DIR/verify-backup.sh" ]; then
+        log "Generating backup validation reports..."
+        local verify_args=(--backup "$BACKUP_DIR/${BACKUP_NAME}.tar.gz" --report-dir "$BACKUP_DIR")
+        if [ "$TEST_RESTORE" = true ]; then
+            verify_args+=(--dry-run)
+        fi
+        if ! bash "$SCRIPT_DIR/verify-backup.sh" "${verify_args[@]}"; then
+            log_error "Standalone backup verification failed"
+            return 1
+        fi
+    else
+        log_warning "verify-backup.sh not found or not executable; skipping validation reports"
+    fi
+
     upload_to_storage
     cleanup_old_backups
     
@@ -414,5 +587,10 @@ main() {
 # Error handling
 trap 'log_error "Backup failed with error"; send_notification "error" "Backup failed"; exit 1' ERR
 
-# Run main process
+# Run verify-only mode (no backup is created) or the normal backup process
+if [ "$VERIFY_ONLY" = true ]; then
+    verify_only_mode "$VERIFY_ARCHIVE"
+    exit $?
+fi
+
 main "$@"
