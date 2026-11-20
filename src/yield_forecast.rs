@@ -231,21 +231,37 @@ pub fn generate_yield_forecast(
     let volatility = calculate_volatility(env, &recent_data);
 
     // Apply adjustments
-    let trend_adjustment = (trend * params.trend_weight as i128) / 100;
-    let volatility_dampening = 100 - ((volatility * params.volatility_adjustment as i128) / 10000);
+    // Forecast math is derived (non-state) data: clamp rather than trap so a
+    // pathological input cannot abort a read-only forecast call. Balances and
+    // rewards never use saturating math — those paths use checked_* helpers.
+    let trend_adjustment = crate::safe_math::saturating_mul_div_i128(
+        trend,
+        i128::from(params.trend_weight),
+        100,
+    );
+    let volatility_dampening = 100_i128.saturating_sub(
+        crate::safe_math::saturating_mul_div_i128(
+            volatility,
+            i128::from(params.volatility_adjustment),
+            10_000,
+        ),
+    );
 
     // Calculate predicted yield per day
-    let base_daily = avg_yield + trend_adjustment;
-    let adjusted_daily = (base_daily * volatility_dampening) / 100;
+    let base_daily = crate::safe_math::saturating_add_i128(avg_yield, trend_adjustment);
+    let adjusted_daily =
+        crate::safe_math::saturating_mul_div_i128(base_daily, volatility_dampening, 100);
 
     // Total forecast for requested days
-    let predicted_yield = adjusted_daily * days as i128;
+    let predicted_yield = adjusted_daily.saturating_mul(i128::from(days));
 
     // Calculate confidence score (0-100)
     // Based on data volume and volatility
-    let data_points_score = (history.len().min(100) * 50) / 100; // Up to 50 points
-    let volatility_penalty = (volatility.min(100) * 50) / 100; // Up to -50 points
-    let confidence_score = data_points_score as u32 + 50 - volatility_penalty as u32;
+    let data_points_score = (history.len().min(100) as u32).saturating_mul(50) / 100; // Up to 50 points
+    let volatility_penalty = (volatility.clamp(0, 100) as u32).saturating_mul(50) / 100; // Up to -50 points
+    let confidence_score = data_points_score
+        .saturating_add(50)
+        .saturating_sub(volatility_penalty);
     let confidence_score = confidence_score.min(100);
 
     let forecast = YieldForecast {

@@ -407,7 +407,14 @@ pub(crate) fn harvest_resources_unguarded(
         let Some(entry) = raw.get(i) else {
             continue;
         };
-        let scaled = u64::from(entry.amount) * effective_total / u64::from(raw_total);
+        // Pro-rata scaling: multiply before dividing to preserve precision,
+        // but guard both the product and the (non-zero) denominator.
+        let scaled = crate::safe_math::checked_mul_div_u64(
+            u64::from(entry.amount),
+            effective_total,
+            u64::from(raw_total),
+        )
+        .ok_or(HarvestError::PriceOverflow)?;
         let amount = u32::try_from(scaled).unwrap_or(u32::MAX);
         if amount == 0 {
             continue;

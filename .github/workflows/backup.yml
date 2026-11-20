@@ -53,7 +53,11 @@ jobs:
           AWS_DEFAULT_REGION: ${{ secrets.AWS_REGION || 'us-east-1' }}
           S3_BUCKET: ${{ secrets.S3_BACKUP_BUCKET }}
         run: |
-          aws s3 cp backups/*.tar.gz s3://$S3_BUCKET/backups/ --recursive
+          if [ -z "${S3_BUCKET:-}" ] || [ -z "${AWS_ACCESS_KEY_ID:-}" ] || [ -z "${AWS_SECRET_ACCESS_KEY:-}" ]; then
+            echo "S3 backup not configured (S3_BUCKET / AWS credentials missing); skipping."
+            exit 0
+          fi
+          aws s3 cp backups/*.tar.gz "s3://$S3_BUCKET/backups/" --recursive
 
       - name: Upload backup artifact
         if: always()
@@ -171,8 +175,6 @@ jobs:
 
   monthly-drill:
     runs-on: ubuntu-latest
-    # Run on first Monday of each month
-    if: github.event.schedule == '0 2 * * *' && github.event_name == 'schedule'
     needs: backup
     env:
       DRILL_REPORT_DIR: drill-reports
@@ -180,6 +182,18 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+
+      # The schedule fires daily; only the first Monday of the month is the
+      # monthly drill. Compute the gate in the shell rather than relying on an
+      # `if:` expression that GitHub Actions cannot evaluate for dates.
+      - name: First-Monday gate
+        id: gate
+        run: |
+          if [ "$(date -u +%u)" = "1" ] && [ "$(date -u +%d)" -le 7 ]; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "run=false" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Download latest backup
         uses: actions/download-artifact@v4

@@ -81,6 +81,10 @@ fi
 
 # Backup retention (days)
 RETENTION_DAYS="${RETENTION_DAYS:-30}"
+# Never prune below this many archives, even if they are older than
+# RETENTION_DAYS. Protects the recovery window after a long outage where no new
+# backups could be taken.
+BACKUP_MIN_KEEP="${BACKUP_MIN_KEEP:-7}"
 
 # Colors for output
 RED='\033[0;31m'
@@ -230,35 +234,53 @@ create_state_snapshots() {
 
     local snapshot_dir="$BACKUP_DIR/$BACKUP_NAME/state/snapshots"
     mkdir -p "$snapshot_dir"
+    local succeeded=0 attempted=0
 
+    attempted=$((attempted + 1))
     horizon_get "/ledgers?order=desc&limit=20" "$snapshot_dir/recent_ledgers.json" \
+        && succeeded=$((succeeded + 1)) \
         || log_warning "Failed to export recent ledgers"
 
     if [ -n "$CONTRACT_ID" ]; then
+        attempted=$((attempted + 1))
         horizon_get "/accounts/${CONTRACT_ID}/effects?order=desc&limit=200" \
             "$snapshot_dir/player_profiles.json" \
+            && succeeded=$((succeeded + 1)) \
             || log_warning "Failed to export player/account effects"
+        attempted=$((attempted + 1))
         horizon_get "/accounts/${CONTRACT_ID}/operations?order=desc&limit=200" \
             "$snapshot_dir/leaderboard.json" \
+            && succeeded=$((succeeded + 1)) \
             || log_warning "Failed to export operations snapshot"
+        attempted=$((attempted + 1))
         horizon_get "/accounts/${CONTRACT_ID}/transactions?order=desc&limit=50" \
             "$snapshot_dir/global_stats.json" \
+            && succeeded=$((succeeded + 1)) \
             || log_warning "Failed to export transaction snapshot"
     else
         echo '{"note":"CONTRACT_ID unset"}' > "$snapshot_dir/player_profiles.json"
         echo '{"note":"CONTRACT_ID unset"}' > "$snapshot_dir/leaderboard.json"
         echo '{"note":"CONTRACT_ID unset"}' > "$snapshot_dir/global_stats.json"
+        # Without a contract id the three account snapshots are not meaningful.
+        attempted=1
     fi
 
     cat > "$snapshot_dir/retention_policy.json" <<EOF
 {
   "retention_days": $RETENTION_DAYS,
+  "min_keep": $BACKUP_MIN_KEEP,
   "schedule": "daily 02:00 UTC",
-  "horizon_url": "$HORIZON_URL"
+  "horizon_url": "$HORIZON_URL",
+  "snapshots_succeeded": $succeeded,
+  "snapshots_attempted": $attempted
 }
 EOF
 
-    log_success "State snapshots created"
+    if [ "$succeeded" -eq 0 ]; then
+        log_error "No Horizon snapshot could be exported; refusing to create an empty backup."
+        return 1
+    fi
+    log_success "State snapshots created ($succeeded/$attempted succeeded)"
 }
 
 # Calculate checksums for verification
@@ -321,10 +343,19 @@ upload_to_storage() {
 
 # Clean old backups
 cleanup_old_backups() {
-    log "Cleaning up old backups (retention: $RETENTION_DAYS days)..."
-    
-    find "$BACKUP_DIR" -name "nebula_backup_*.tar.gz" -type f -mtime +$RETENTION_DAYS -delete
-    
+    log "Cleaning up old backups (retention: ${RETENTION_DAYS}d, min keep: $BACKUP_MIN_KEEP)..."
+
+    # Age-based pruning only, but never below BACKUP_MIN_KEEP archives. Sort
+    # newest-first and keep the first N regardless of age.
+    find "$BACKUP_DIR" -name "nebula_backup_*.tar.gz" -type f \
+        -printf '%T@ %p\n' | sort -rn | tail -n +$((BACKUP_MIN_KEEP + 1)) \
+        | while read -r _ts old; do
+            age_days=$(( ($(date +%s) - $(stat -c %Y "$old")) / 86400 ))
+            if [ "$age_days" -gt "$RETENTION_DAYS" ]; then
+                rm -f "$old"
+            fi
+        done
+
     local remaining=$(find "$BACKUP_DIR" -name "nebula_backup_*.tar.gz" -type f | wc -l)
     log_success "Cleanup complete. Remaining backups: $remaining"
 }

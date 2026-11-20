@@ -63,7 +63,7 @@ See [docs/YIELD_MATH.md](YIELD_MATH.md) for the full derivation of yield, stakin
 
 ### Reentrancy
 
-Soroban's execution model is inherently reentrancy-safe: cross-contract calls complete before control returns. The contract also maintains an explicit reentrancy guard (`src/reentrancy_guard.rs`) for defense-in-depth on operations that cross contract boundaries.
+Soroban's execution model completes outbound cross-contract calls atomically before control returns, so the classic EVM-style reentry vector does not apply to calls *made by* this contract. The remaining vector is **inbound**: `require_auth` against a custom-account contract executes that account's `__check_auth` code while this transaction is still in flight. The explicit global mutex in `src/reentrancy_guard.rs` covers that path. See [docs/REENTRANCY_PROTECTION.md](REENTRANCY_PROTECTION.md) for the guarded entry points, the nesting rule, and the attack-test suite.
 
 ### Input Validation
 

@@ -29,7 +29,7 @@ groups:
 
       # Critical: No recent backup
       - alert: NoRecentBackup
-        expr: (time() - backup_last_success_timestamp) > 172800
+        expr: (time() - backup_last_success_timestamp) > 90000
         for: 10m
         labels:
           severity: critical

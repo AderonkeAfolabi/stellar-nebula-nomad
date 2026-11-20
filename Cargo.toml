@@ -121,6 +121,11 @@ path = "tests/chaos/byzantine_attacks.rs"
 name = "chaos_state_corruption"
 path = "tests/chaos/state_corruption.rs"
 
+# Reentrancy attack scenarios against the global guard (Issue #472)
+[[test]]
+name = "reentrancy_attack_tests"
+path = "tests/security/reentrancy_attack_tests.rs"
+
 [[test]]
 name = "fuzz"
 path = "tests/fuzz/fuzz.rs"
