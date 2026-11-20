@@ -9,6 +9,11 @@ use crate::player_profile;
 
 pub const PROPOSAL_DURATION_SECS: u64 = 86_400 * 3; // 3 days
 
+/// Highest guild tax rate a founder can set: 25% of each tribute.
+pub const MAX_GUILD_TAX_BPS: u32 = 2_500;
+/// 100% in basis points.
+pub const GUILD_BPS_DENOMINATOR: u32 = 10_000;
+
 // ─── Data Types ───────────────────────────────────────────────────────────────
 
 #[derive(Clone, Debug, PartialEq)]
@@ -71,6 +76,7 @@ pub enum GuildEconomyKey {
     MemberVoted(u64, u64, Address), // (alliance_id, proposal_id, player) -> bool
     QuestPayout(u64, u64), // (alliance_id, quest_id) -> QuestRewardPayout
     QuestClaim(u64, u64, Address), // (alliance_id, quest_id, player) -> bool
+    GuildTaxRate(u64),             // alliance_id -> tax rate in bps
 }
 
 #[contracterror]
@@ -93,6 +99,22 @@ pub enum GuildEconomyError {
     QuestRewardProfileNotFound = 11,
     /// A quest payout had no contributors or invalid amounts.
     InvalidQuestReward = 12,
+    /// Tax rate above `MAX_GUILD_TAX_BPS`, or a non-positive tribute.
+    InvalidTax = 13,
+    /// Only the alliance founder can change the tax rate.
+    NotFounder = 14,
+}
+
+/// How one tribute payment was split between the guild treasury and the payer.
+#[derive(Clone, Debug, PartialEq)]
+#[contracttype]
+pub struct TributeReceipt {
+    pub alliance_id: u64,
+    pub gross: i128,
+    pub tax: i128,
+    pub net: i128,
+    pub tax_bps: u32,
+    pub treasury_after: i128,
 }
 
 // ─── Functions ────────────────────────────────────────────────────────────────
@@ -282,6 +304,83 @@ pub fn execute_proposal(
     );
 
     Ok(())
+}
+
+/// Splits a tribute into `(tax, net)` at `tax_bps`, rounding the tax down.
+pub fn split_guild_tribute(gross: i128, tax_bps: u32) -> Option<(i128, i128)> {
+    if gross < 0 || tax_bps > GUILD_BPS_DENOMINATOR {
+        return None;
+    }
+    let tax = gross.checked_mul(i128::from(tax_bps))? / i128::from(GUILD_BPS_DENOMINATOR);
+    Some((tax, gross - tax))
+}
+
+/// Sets the guild tax charged on tributes. Founder only, capped at `MAX_GUILD_TAX_BPS`.
+pub fn set_guild_tax_rate(
+    env: &Env,
+    founder: Address,
+    alliance_id: u64,
+    tax_bps: u32,
+) -> Result<(), GuildEconomyError> {
+    founder.require_auth();
+    let alliance =
+        get_alliance(env, alliance_id).map_err(|_| GuildEconomyError::NotAllianceMember)?;
+    if alliance.founder != founder {
+        return Err(GuildEconomyError::NotFounder);
+    }
+    if tax_bps > MAX_GUILD_TAX_BPS {
+        return Err(GuildEconomyError::InvalidTax);
+    }
+    env.storage()
+        .persistent()
+        .set(&GuildEconomyKey::GuildTaxRate(alliance_id), &tax_bps);
+    env.events().publish(
+        (symbol_short!("guild_ec"), symbol_short!("tax_set")),
+        (alliance_id, tax_bps),
+    );
+    Ok(())
+}
+
+/// Current guild tax rate in bps (0 until the founder sets one).
+pub fn get_guild_tax_rate(env: &Env, alliance_id: u64) -> u32 {
+    env.storage()
+        .persistent()
+        .get(&GuildEconomyKey::GuildTaxRate(alliance_id))
+        .unwrap_or(0)
+}
+
+/// A member pays tribute on `gross` earnings: the guild tax goes to the
+/// alliance treasury (spendable through treasury proposals) and the rest stays
+/// with the member. Returns the split.
+pub fn pay_guild_tribute(
+    env: &Env,
+    member: Address,
+    alliance_id: u64,
+    gross: i128,
+) -> Result<TributeReceipt, GuildEconomyError> {
+    member.require_auth();
+    if gross <= 0 {
+        return Err(GuildEconomyError::InvalidTax);
+    }
+    if !is_alliance_member(env, alliance_id, &member) {
+        return Err(GuildEconomyError::NotAllianceMember);
+    }
+    let tax_bps = get_guild_tax_rate(env, alliance_id);
+    let (tax, net) = split_guild_tribute(gross, tax_bps).ok_or(GuildEconomyError::InvalidTax)?;
+    let treasury_after = credit_alliance_treasury(env, alliance_id, tax)
+        .map_err(|_| GuildEconomyError::NotAllianceMember)?;
+    env.events().publish(
+        (symbol_short!("guild_ec"), symbol_short!("tribute")),
+        (alliance_id, member, gross, tax),
+    );
+    Ok(TributeReceipt {
+        alliance_id,
+        gross,
+        tax,
+        net,
+        tax_bps,
+        treasury_after,
+    })
 }
 
 /// Get details of a treasury spending proposal.

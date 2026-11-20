@@ -190,6 +190,10 @@ path = "tests/economy/test_treasure_vault.rs"
 name = "test_yield_forecast"
 path = "tests/economy/test_yield_forecast.rs"
 
+[[test]]
+name = "test_economy_systems"
+path = "tests/economy/test_economy_systems.rs"
+
 # DAO, RBAC, emergency controls
 [[test]]
 name = "test_dao"
