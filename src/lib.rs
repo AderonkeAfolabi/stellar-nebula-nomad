@@ -468,9 +468,13 @@ pub use portal_registry::{
     MAX_PORTALS_PER_TX, MIN_STABLE_PCT,
 };
 pub use privacy_stats::{
-    batch_commit_stats, commit_private_stat, get_commitment, get_commitment_count, is_opted_in,
-    opt_in_privacy, reset_burst_counter as reset_privacy_burst, verify_private_stat, PrivacyError,
-    StatCommitment, MAX_COMMITMENTS_PER_TX,
+    batch_commit_stats, commit_private_stat, configure_private_aggregate,
+    contribute_anonymous_stat, current_privacy_epoch, get_commitment, get_commitment_count,
+    get_privacy_report, get_privacy_transparency_report, get_private_aggregate_config,
+    initialize_privacy_stats, is_opted_in, opt_in_privacy, publish_privacy_report,
+    reset_burst_counter as reset_privacy_burst, verify_private_stat, PrivacyError, PrivacyReport,
+    PrivacyTransparencyReport, PrivateAggregateConfig, StatCommitment, MAX_COMMITMENTS_PER_TX,
+    MIN_REPORT_COHORT, PRIVACY_EPOCH_SECS,
 };
 pub use prize_distributor::{
     distribute_weekly_prizes, fund_prize_pool, get_last_reset, get_prize_pool,
