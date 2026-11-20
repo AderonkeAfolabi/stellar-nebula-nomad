@@ -56,7 +56,8 @@ mod onboarding_tutorial;
 mod player_profile;
 mod player_segmentation;
 mod pvp_combat;
-mod referral_system;
+/// Referral codes, tracking, rewards and anti-abuse (#701).
+pub mod referral_system;
 /// Rate-limited resource minting and the player balance ledger.
 pub mod resource_minter;
 mod session_manager;
@@ -72,6 +73,10 @@ mod achievement_engine;
 mod achievements;
 mod badges;
 mod batch_processor;
+/// Behavioural bot detection, scoring and the admin review queue (#704).
+pub mod bot_detection;
+/// Daily login rewards, streaks and special reward events (#703).
+pub mod daily_rewards;
 mod data_exporter;
 mod dex_integration;
 mod difficulty_curve;
@@ -103,7 +108,8 @@ pub mod staking;
 /// DAO proposal creation, voting, and execution flows.
 pub mod governance;
 mod indexer_callbacks;
-mod theme_customizer;
+/// Ship themes and per-player theme preferences (#700).
+pub mod theme_customizer;
 mod yield_farming;
 
 mod bounty_board;
