@@ -303,8 +303,9 @@ pub use dex_integration::{
 pub use dynamic_pricing::{
     deviation_bps, dynamic_price, ema_step, get_price_state, get_pricing_config,
     get_pricing_history, get_sma, get_volatility_bps, init_pricing_config, listing_price,
-    observe_price, observe_supply_demand, price_from_state, set_pricing_config, DynamicPrice,
-    PricePoint, PriceState, PricingConfig, PricingError, DEFAULT_BASE_VOLATILITY_BAND_BPS,
+    observe_oracle_price, observe_price, observe_supply_demand, price_from_state,
+    set_pricing_config, DynamicPrice, PricePoint, PriceState, PricingConfig, PricingError,
+    DEFAULT_BASE_VOLATILITY_BAND_BPS,
     DEFAULT_MAX_DEVIATION_BPS, DEFAULT_MIN_COOLDOWN_SECS, DEFAULT_SMOOTHING_BPS,
     DEFAULT_SUPPLY_DEMAND_ADJ_BPS, MAX_HISTORY_ENTRIES, MAX_SMOOTHING_BPS, MAX_VOLATILITY_BAND_BPS,
 };
@@ -335,8 +336,10 @@ pub use ship_upgrade::{
     UpgradeEconomy, DEFAULT_GROWTH_BPS, DEFAULT_MAX_COST,
 };
 pub use treasure_vault::{
-    claim_treasure, deposit_treasure, get_vault, TreasureVault, VaultError,
-    DEFAULT_MIN_LOCK_DURATION,
+    claim_treasure, claim_vault_loot, deposit_treasure, discover_vault, get_key_balance,
+    get_pity_counter, get_vault, get_vault_discovery, select_loot_tier, LootRarity, LootReward,
+    LootTier, SpecialReward, TreasureVault, VaultDiscovery, VaultError,
+    DEFAULT_MIN_LOCK_DURATION, LOOT_TABLE, PITY_THRESHOLD,
 };
 
 pub use anomaly_classifier::{
@@ -445,9 +448,12 @@ pub use event_scheduler::{
     SEASONAL_REWARD_CLAIM_WINDOW, WEEKLY_FESTIVAL_INTERVAL,
 };
 pub use market_oracle::{
-    add_oracle_source, batch_update_prices, get_current_market_rate, get_price_data,
-    get_price_history, initialize_oracle, update_resource_price, OracleError as MarketOracleError,
-    PriceData, MAX_BATCH_UPDATE,
+    add_oracle_source, aggregate_resource_price, batch_update_prices, compute_consensus,
+    get_current_market_rate, get_oracle_sources, get_price_data, get_price_history,
+    get_source_price, initialize_oracle, remove_oracle_source, submit_source_price,
+    update_resource_price, validate_price, OracleError as MarketOracleError, PriceData,
+    SourcePrice, MAX_BATCH_UPDATE, MAX_OBSERVATION_AGE_SECS, MAX_ORACLE_SOURCES,
+    MAX_PRICE_JUMP_BPS, MAX_SOURCE_DEVIATION_BPS, MIN_ORACLE_SOURCES,
 };
 pub use navigation_planner::{
     add_nebula_connection, add_nebula_connections_batch, calculate_optimal_route, get_connection,

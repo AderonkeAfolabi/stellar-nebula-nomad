@@ -540,6 +540,39 @@
         market_oracle::add_oracle_source(&env, admin, new_source)
     }
 
+    /// Remove a compromised oracle source (admin only, Issue #654).
+    pub fn remove_oracle_source(
+        env: Env,
+        admin: Address,
+        source: Address,
+    ) -> Result<(), MarketOracleError> {
+        market_oracle::remove_oracle_source(&env, admin, source)
+    }
+
+    /// List registered oracle sources.
+    pub fn get_oracle_sources(env: Env) -> Vec<Address> {
+        market_oracle::get_oracle_sources(&env)
+    }
+
+    /// Submit a signed price observation from a registered source (Issue #654).
+    pub fn submit_source_price(
+        env: Env,
+        source: Address,
+        resource: Symbol,
+        price: i128,
+    ) -> Result<SourcePrice, MarketOracleError> {
+        market_oracle::submit_source_price(&env, source, resource, price)
+    }
+
+    /// Aggregate fresh source observations into a consensus price
+    /// (permissionless keeper call, Issue #654).
+    pub fn aggregate_resource_price(
+        env: Env,
+        resource: Symbol,
+    ) -> Result<PriceData, MarketOracleError> {
+        market_oracle::aggregate_resource_price(&env, resource)
+    }
+
     // ─── Procedural Music and Sound Seed Generator (Issue #80) ───────────
 
     /// Initialize default instrument presets.
