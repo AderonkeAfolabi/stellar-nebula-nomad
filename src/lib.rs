@@ -287,8 +287,9 @@ pub use batch_processor::{
     BatchOpType, BatchResult, MAX_BATCH_SIZE,
 };
 pub use bounty_board::{
-    claim_bounty, get_bounty, initialize_bounty_board, post_bounty, set_bounty_expiry, Bounty,
-    BountyError, DEFAULT_BOUNTY_EXPIRY, MAX_ACTIVE_BOUNTIES,
+    approve_bounty, cancel_bounty, claim_bounty, dispute_bounty, get_bounty,
+    initialize_bounty_board, post_bounty, set_bounty_expiry, Bounty, BountyError,
+    DEFAULT_BOUNTY_EXPIRY, MAX_ACTIVE_BOUNTIES,
 };
 pub use contract_versioning::{
     check_compatibility, get_migration_record, get_version, initialize_version,
@@ -377,16 +378,19 @@ pub use sustainability_metrics::{
 };
 
 pub use fractional_resources::{
-    fractionalize_resource, get_original_resource, get_owner_shares, get_share, get_total_shares,
-    initialize as initialize_fractional, is_share_owner, merge_fractions, transfer_share,
+    buy_listed_share, cancel_share_listing, fractionalize_resource, get_last_share_price,
+    get_original_resource, get_owner_shares, get_share, get_share_listing, get_total_shares,
+    initialize as initialize_fractional, is_share_owner, list_share_for_sale, merge_fractions,
+    transfer_share, ShareListing,
     update_config as update_fractional_config, FractionalConfig, FractionalError, FractionalShare,
     OriginalResource, MAX_FRACTIONS_PER_TX, MIN_SHARE_SIZE,
 };
 pub use yield_forecast::{
     batch_generate_forecasts, clear_stale_forecasts, generate_yield_forecast, get_cached_forecast,
-    get_history_count, get_model_params, get_model_version, get_player_history,
-    initialize as initialize_forecast, update_forecast_model, update_model_params, ForecastError,
-    ModelParams, YieldDataPoint, YieldForecast, MAX_FORECAST_BURST, MAX_FORECAST_DAYS,
+    analyze_yield_risk, get_history_count, get_model_params, get_model_version,
+    get_player_history, initialize as initialize_forecast, update_forecast_model,
+    update_model_params, ForecastError, ModelParams, YieldDataPoint, YieldForecast,
+    YieldRiskLevel, YieldRiskReport, MAX_FORECAST_BURST, MAX_FORECAST_DAYS,
     MAX_HISTORY_POINTS,
 };
 
@@ -396,8 +400,11 @@ pub use alliance_manager::{
     AllianceError, MembershipRecord, MAX_MEMBERS_PER_ALLIANCE,
 };
 pub use guild_economy::{
-    claim_quest_reward_share, get_quest_reward_payout, record_quest_rewards, GuildEconomyError,
-    GuildEconomyKey, QuestRewardPayout, QuestRewardSplit, TreasuryProposal,
+    claim_quest_reward_share, create_treasury_proposal, execute_proposal, get_guild_tax_rate,
+    get_proposal, get_quest_reward_payout, pay_guild_tribute, record_quest_rewards,
+    set_guild_tax_rate, split_guild_tribute, vote_on_proposal, GuildEconomyError,
+    GuildEconomyKey, QuestRewardPayout, QuestRewardSplit, TreasuryProposal, TributeReceipt,
+    MAX_GUILD_TAX_BPS,
 };
 pub use guild_quests::{
     apply_reward_bps, assign_guild_quest, calculate_reward_split, clear_guild_quest_assignment,
