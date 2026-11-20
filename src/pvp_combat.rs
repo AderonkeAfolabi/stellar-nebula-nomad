@@ -1185,55 +1185,73 @@ mod tests {
     #[contractimpl]
     impl Stub {}
 
+    /// Run `f` in its own contract frame: each `require_auth()` for a given
+    /// address may be satisfied only once per frame (SDK 22+).
+    fn at<T>(env: &Env, contract: &Address, f: impl FnOnce() -> T) -> T {
+        env.as_contract(contract, f)
+    }
+
     fn make_env() -> (Env, soroban_sdk::Address) {
         let env = Env::default();
+        env.mock_all_auths();
         let id = env.register(Stub, ());
         (env, id)
     }
 
-    // // #[test]
+    #[test]
     fn test_create_challenge() {
-        let (env, _contract_id) = make_env();
+        let (env, contract) = make_env();
         let challenger = Address::generate(&env);
         let opponent = Address::generate(&env);
 
-        env.as_contract(&_contract_id, || {
-            let challenge_id = create_challenge(&env, &challenger, &opponent, 100).unwrap();
-            assert!(challenge_id > 0);
+        let challenge_id = at(&env, &contract, || {
+            create_challenge(&env, &challenger, &opponent, 100)
+        })
+        .unwrap();
+        assert!(challenge_id > 0);
 
-            let challenge = get_challenge(&env, challenge_id).unwrap();
-            assert_eq!(challenge.challenger, challenger);
-        });
+        let challenge = at(&env, &contract, || get_challenge(&env, challenge_id)).unwrap();
+        assert_eq!(challenge.challenger, challenger);
     }
 
-    // // #[test]
+    #[test]
     fn test_accept_challenge_and_combat() {
-        let (env, _contract_id) = make_env();
+        let (env, contract) = make_env();
         let challenger = Address::generate(&env);
         let opponent = Address::generate(&env);
 
-        env.as_contract(&_contract_id, || {
-            let challenge_id = create_challenge(&env, &challenger, &opponent, 100).unwrap();
-            let combat_id = accept_challenge(&env, &opponent, challenge_id).unwrap();
+        let challenge_id = at(&env, &contract, || {
+            create_challenge(&env, &challenger, &opponent, 100)
+        })
+        .unwrap();
+        let combat_id = at(&env, &contract, || {
+            accept_challenge(&env, &opponent, challenge_id)
+        })
+        .unwrap();
 
-            let combat = get_combat(&env, combat_id).unwrap();
-            assert_eq!(combat.status, symbol_short!("active"));
-        });
+        let combat = at(&env, &contract, || get_combat(&env, combat_id)).unwrap();
+        assert_eq!(combat.status, symbol_short!("active"));
     }
 
-    // // #[test]
+    #[test]
     fn test_execute_move() {
-        let (env, _contract_id) = make_env();
+        let (env, contract) = make_env();
         let challenger = Address::generate(&env);
         let opponent = Address::generate(&env);
 
-        env.as_contract(&_contract_id, || {
-            let challenge_id = create_challenge(&env, &challenger, &opponent, 100).unwrap();
-            let combat_id = accept_challenge(&env, &opponent, challenge_id).unwrap();
+        let challenge_id = at(&env, &contract, || {
+            create_challenge(&env, &challenger, &opponent, 100)
+        })
+        .unwrap();
+        let combat_id = at(&env, &contract, || {
+            accept_challenge(&env, &opponent, challenge_id)
+        })
+        .unwrap();
 
-            let combat = get_combat(&env, combat_id).unwrap();
-            let first_player = combat.turn.clone();
+        let combat = at(&env, &contract, || get_combat(&env, combat_id)).unwrap();
+        let first_player = combat.turn.clone();
 
+        at(&env, &contract, || {
             execute_move(
                 &env,
                 &first_player,
@@ -1241,46 +1259,44 @@ mod tests {
                 Symbol::new(&env, "attack"),
                 10,
             )
-            .unwrap();
+        })
+        .unwrap();
 
-            let updated = get_combat(&env, combat_id).unwrap();
-            assert!(updated.player2_hp < 100 || updated.player1_hp < 100);
-        });
+        let updated = at(&env, &contract, || get_combat(&env, combat_id)).unwrap();
+        assert!(updated.player2_hp < 100 || updated.player1_hp < 100);
     }
 
-    // // #[test]
+    #[test]
     fn test_matchmaking() {
-        let (env, _contract_id) = make_env();
+        let (env, contract) = make_env();
         let player1 = Address::generate(&env);
         let player2 = Address::generate(&env);
 
-        env.as_contract(&_contract_id, || {
-            join_matchmaking(&env, &player1, 100).unwrap();
-            join_matchmaking(&env, &player2, 100).unwrap();
+        at(&env, &contract, || join_matchmaking(&env, &player1, 100)).unwrap();
+        at(&env, &contract, || join_matchmaking(&env, &player2, 100)).unwrap();
 
-            let queue_size = get_matchmaking_queue_size(&env);
-            assert_eq!(queue_size, 2);
+        let queue_size = at(&env, &contract, || get_matchmaking_queue_size(&env));
+        assert_eq!(queue_size, 2);
 
-            let matched = process_matchmaking(&env).unwrap();
-            assert!(matched.is_some());
-        });
+        let matched = at(&env, &contract, || process_matchmaking(&env)).unwrap();
+        assert!(matched.is_some());
     }
 
-    // // #[test]
+    #[test]
     fn test_set_admin_cannot_be_hijacked_after_init() {
         // Issue #237: set_admin previously let ANY caller overwrite the
         // admin at any time. Now it is a one-time initializer.
-        let (env, _contract_id) = make_env();
+        let (env, contract) = make_env();
         let admin = Address::generate(&env);
         let attacker = Address::generate(&env);
 
-        env.as_contract(&_contract_id, || {
-            set_admin(&env, &admin).unwrap();
+        at(&env, &contract, || set_admin(&env, &admin)).unwrap();
 
-            let result = set_admin(&env, &attacker);
-            assert_eq!(result, Err(PvPError::AlreadyInitialized));
+        let result = at(&env, &contract, || set_admin(&env, &attacker));
+        assert_eq!(result, Err(PvPError::AlreadyInitialized));
 
-            let result = set_rewards_config(
+        let result = at(&env, &contract, || {
+            set_rewards_config(
                 &env,
                 &attacker,
                 RewardsConfig {
@@ -1289,8 +1305,8 @@ mod tests {
                     elo_bonus_multiplier: 1,
                     streak_bonus: 0,
                 },
-            );
-            assert_eq!(result, Err(PvPError::Unauthorized));
+            )
         });
+        assert_eq!(result, Err(PvPError::Unauthorized));
     }
 }

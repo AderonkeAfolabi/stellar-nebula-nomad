@@ -84,7 +84,9 @@ pub fn initialize_oracle(
         return Err(OracleError::NoOracleSources);
     }
 
-    env.storage().instance().set(&OracleKey::OracleAdmin, &admin);
+    env.storage()
+        .instance()
+        .set(&OracleKey::OracleAdmin, &admin);
     env.storage()
         .persistent()
         .set(&OracleKey::OracleSources, &sources);

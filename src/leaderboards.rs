@@ -214,7 +214,9 @@ pub fn set_admin(env: &Env, admin: &Address) -> Result<(), LeaderboardError> {
 }
 
 fn get_admin(env: &Env) -> Option<Address> {
-    env.storage().persistent().get(&LeaderboardDataKey::LeaderboardAdmin)
+    env.storage()
+        .persistent()
+        .get(&LeaderboardDataKey::LeaderboardAdmin)
 }
 
 fn require_admin(env: &Env, caller: &Address) -> Result<(), LeaderboardError> {
