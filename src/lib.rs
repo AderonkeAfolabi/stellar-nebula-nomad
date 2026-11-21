@@ -291,8 +291,10 @@ pub use ship_nft::{DataKey as ShipDataKey, ShipError, ShipNft};
 pub use ship_registry::Ship;
 
 pub use batch_processor::{
-    clear_batch, execute_batch, get_player_batch, queue_batch_operation, BatchError, BatchOp,
-    BatchOpType, BatchResult, MAX_BATCH_SIZE,
+    clear_batch, execute_batch, execute_batch_mint, execute_batch_trade, execute_batch_transfer,
+    execute_batch_update, get_player_batch, queue_batch_operation, BatchError, BatchMintResult,
+    BatchOp, BatchOpType, BatchResult, BatchTradeResult, BatchTransferItem, BatchTransferResult,
+    BatchUpdateItem, BatchUpdateResult, MAX_BATCH_SIZE,
 };
 pub use bounty_board::{
     approve_bounty, cancel_bounty, claim_bounty, dispute_bounty, get_bounty,
