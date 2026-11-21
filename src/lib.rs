@@ -575,7 +575,11 @@ pub use nomad_bonding::{
 pub use notifications::alerts::{
     check_low_resources, notify_crafting_complete, notify_rare_discovery,
 };
-pub use notifications::push_service::{emit_notification, Notification};
+pub use notifications::push_service::{
+    clear_inbox, emit_notification, get_inbox, get_notification_preferences, notify,
+    set_notification_preferences, Notification, NotificationError, NotificationPreferences,
+    NotificationPriority, ALL_CHANNELS, CHANNEL_EMAIL, CHANNEL_IN_APP, CHANNEL_PUSH,
+};
 pub use player_housing::{
     clear_guild_banner, customize_theme, define_furniture, expand_storage, feature_house,
     get_achievement_displays, get_featured_houses, get_furniture, get_guild_banner, get_house,
